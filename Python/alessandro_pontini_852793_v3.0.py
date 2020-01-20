@@ -58,7 +58,7 @@ df_lenders_not_normalized.head()
 # In[6]:
 
 
-# impongo index=loan_id per poter usare explode che per ogni loan_id mi prende ogni elemento della lista creata con la strip 
+# impongo index=loan_id per poter usare explode che per ogni loan_id mi prende ogni elemento della lista creata con la strip
 # e mi crea un nuove righe in un nuovo data set
 df_lenders_normalized = df_lenders_not_normalized.set_index('loan_id')['lenders'].str.split(pat=',').explode().reset_index()
 
@@ -169,7 +169,7 @@ temp_table[temp_table>1]
 # ***
 
 # ## <span style="color:red">4) For each country, compute how many loans have involved that country as borrowers.</span>
-# 
+#
 
 # ***
 
@@ -315,7 +315,7 @@ df_lenders_info = pd.read_csv(dire2)
 # In[34]:
 
 
-# merge in una temporanea di df_lenders con la normalizzata 
+# merge in una temporanea di df_lenders con la normalizzata
 # per avere loan_id
 temp_df = df_lenders_info[['permanent_name', 'country_code']].merge(df_lenders_normalized, how='left', left_on='permanent_name', right_on='lenders')
 
@@ -702,39 +702,6 @@ temp_df.groupby('differenza').size()
 temp_df.duration = temp_df.duration.dt.days
 
 
-# def func(k):
-#     x = round(( k.loan_amount * k.duration)/(31+365+30),2)
-#     y = k['planned_expiration_time'].dt.year
-#     return [y,x]
-# 
-# def lim_inf(k):
-#     lim_inf = datetime.datetime(k.planned_expiration_time.year, 1,1)
-#     z = k.planned_expiration_time - lim_inf
-#     z = z.days
-#     x = round(( k.loan_amount * z)/(31+365+30),2) 
-#     y = k.planned_expiration_time.year
-#     return [y,x]
-# 
-# def lim_sup(k):
-#     lim_sup = datetime.datetime(k.disburse_time.year, 12, 31)
-#     f = lim_sup - k.disburse_time
-#     f = f.days
-#     u = round(( k.loan_amount * f)/(31+365+30),2) 
-#     v = k.disburse_time.year
-#     return [v,u]
-# 
-# def func4(k):
-#     lim_inf_1 = lim_inf(k)
-#     lim_sup_2 = lim_sup(k)
-#     return lim_inf_1, lim_sup_2
-# 
-#     
-# def create_df_year(array):
-#     d1 = {'tot' : array}
-#     df2 = pd.DataFrame(d1)
-#     df3 = df2.tot.apply(pd.Series)
-#     df3.columns = ['year', 'total'] 
-#     return df3
 
 # In[91]:
 
@@ -765,7 +732,7 @@ def func_final(df):
         flag = df.year_disburse_time
         # calcolo dal disburse time fino al planned expiration e quando ho gli anni che coincidono vado al secondo step
         while df.year_planned_expiration_time != flag:
-            
+
             lim_sup = datetime.datetime(flag, 12, 31)
             day_sup = lim_sup - data_inf
             day_sup = day_sup.days
@@ -775,7 +742,7 @@ def func_final(df):
             lista_final.append(result)
             flag = flag + 1
             data_inf = datetime.datetime(flag, 1, 1)
-        
+
         # calcolo i restanti giorni
         lim_inf = datetime.datetime(df.year_planned_expiration_time, 1,1)
         day_inf = df.planned_expiration_time - lim_inf
@@ -784,14 +751,14 @@ def func_final(df):
         years = df.year_planned_expiration_time
         result = [money,years]
         lista_final.append(result)
-    
+
     return ok
 
 def create_df_year(array):
     d1 = {'tot' : array}
     df2 = pd.DataFrame(d1)
     df3 = df2.tot.apply(pd.Series)
-    df3.columns = ['total', 'year'] 
+    df3.columns = ['total', 'year']
     return df3
 
 
@@ -817,13 +784,13 @@ final_df
 
 
 final_df.year = final_df.year.astype('int')
-#pd.options.display.float_format = '{:, .2f}'.format
+final_df.total = final_df.total.astype('int')
 final_df.groupby('year').sum()
 
 
-# # TEMPO IMPIEGATO 12 PUNTI : 7 min 
+# # TEMPO IMPIEGATO 12 PUNTI : 7 min
 # # COMPUTER UTILIZZATO : MACBOOK PRO 19
 # # PROCESSORE : 1,4 GHz Intel Core i5 quad-core
 # # MEMORIA : 8 GB 2133 MHz LPDDR3
 # # SCHEDA GRAFICA : Intel Iris Plus Graphics 645 1536 MB
-# 
+#
