@@ -1,0 +1,250 @@
+1                                           The SAS System               21:42 Thursday, March 5, 2020
+
+NOTE: Copyright (c) 2016 by SAS Institute Inc., Cary, NC, USA. 
+NOTE: SAS (r) Proprietary Software 9.4 (TS1M5) 
+      Licensed to UNIV. DI MILANO BICOCCA - CAMPUS T&R, Site 50306432.
+NOTE: This session is executing on the X64_10PRO  platform.
+
+
+
+NOTE: Updated analytical products:
+      
+      SAS/STAT 14.3
+      SAS/ETS 14.3
+      SAS/OR 14.3
+      SAS/IML 14.3
+      SAS/QC 14.3
+
+NOTE: Additional host information:
+
+ X64_10PRO WIN 10.0.18362  Workstation
+
+NOTE: SAS initialization used:
+      real time           0.70 seconds
+      cpu time            0.39 seconds
+      
+1          /************************************************************************/
+2          /************************ DIAGNOSTICHE SUL MODELLO **********************/
+3          /************************************************************************/
+4          
+5          /***********  SAS 9.4 **********/
+6          
+7          /*
+8          ++ Testo di riferimento per il software SAS: Manuale SAS/STAT:
+9          http://support.sas.com/documentation/onlinedoc/stat/index.html#stat121
+10         http://support.sas.com/documentation/cdl/en/statug/66103/HTML/default/viewer.htm#titlepage.
+10       ! htm
+11         http://support.sas.com/documentation/cdl/en/statug/66103/PDF/default/statug.pdf
+12         
+13         ++ Altri manuali sono disponibili alla pagina:
+14         http://support.sas.com/documentation/94/index.html
+15         */
+16         
+17         /* DIRECTORY DI LAVORO: */
+18         /*Modificare inserendo il percorso opportuno:*/
+19         
+20         LIBNAME User 'C:\Users\daniele.riggi\Desktop\Esame Vitta - Statistical
+20       ! Modeling\esercitazioni\1a_Esercitazione - Modello Lineare\SAS\02_Dataset'; run;
+NOTE: Libref USER was successfully assigned as follows: 
+      Engine:        V9 
+      Physical Name: C:\Users\daniele.riggi\Desktop\Esame Vitta - Statistical 
+      Modeling\esercitazioni\1a_Esercitazione - Modello Lineare\SAS\02_Dataset
+21         
+22         /*APRIRE LA VISUALIZZAZIONE DELL'OUTPUT IN HTML*/
+23         
+24         
+25         /*****************************************/
+2                                           The SAS System               21:42 Thursday, March 5, 2020
+
+26         /********* DIAGNOSTICHE SUL MODELLO ******/
+27         /*****************************************/
+28         
+29         /*ESEMPIO: PM10
+30         
+31         Il data set contiene informazioni relative all’inquinamento dell’aria rilevato in
+31       ! corrispondenza delle strade e
+32         degli snodi stradali principali, e contiene le seguenti variabili:
+33         	1. PM10: concentrazione di particelle di pm10
+34         	2. CARS: numero di auto che transitano in un’ora
+35         	3. TEMP: temperatura misurata a 2 metri dal suolo
+36         	4. WIND: velocità del vento (metri/secondo)
+37         	5. D_TEMP: differenza tra temperatura misurata a 25 metri dal suolo e a 2 metri dal suolo
+38         	6. HOURS: numero di ore trascorse dalla mezzanotte del giorno di rilevazione
+39         
+40         
+41          /*MATRICE DI CORRELAZIONE insieme ad alcune statistiche descrittive*/
+42          /*COSTRUZIONE DELLA MATRICE DEI GRAFICI A DISPERSIONE*/
+43         
+44          title ' PM_10';
+45          ods graphics on;
+46           proc corr data=PM_10 noprob plots=matrix(histogram nvar=all ) ;
+47           run;
+
+WARNING: The scatter plot matrix with more than 5000 points has been suppressed. Use the 
+         PLOTS(MAXPOINTS= ) option in the PROC CORR statement to change or override the cutoff.
+NOTE: The PROCEDURE CORR printed page 1.
+NOTE: PROCEDURE CORR used (Total process time):
+      real time           0.08 seconds
+      cpu time            0.03 seconds
+      
+
+48          ods graphics off;
+49         
+50         /*1) DIAGNOSTICHE DI COLLINEARITA'*/
+51         title "REG: diagnostiche di collinearità";
+52         proc reg data=PM_10;
+53          mod1: model  pm10 = cars temp  wind  / TOL VIF COLLIN ;
+54          mod2: model  pm10 = cars temp  wind D_TEMP HOURS / TOL VIF COLLIN ;
+55         
+56           /*Opzioni:
+57         	'tol' = indice di tolleranza (normalizzato in [0, 1]);
+58         	'vif' = 'Variance-Inflation Factors', ossia fattori di inflazione della varianza
+59         	  		o anche varianza multifattoriale (reciproco dell'indice di tolleranza.
+60         	        Valore soglia = 20: se 'vif' è maggiore o uguale a 20, vi è un eccessivo
+61         	  	    grado di collinearità);
+62         	'collin' = produce un'analisi di collinearità, con il computo dell'indice di condizione
+63         	           (valore soglia = 30) e della proporzione di variazione.
+64         	  */
+65           run;
+
+66           QUIT;
+
+NOTE: The PROCEDURE REG printed pages 2-4.
+3                                           The SAS System               21:42 Thursday, March 5, 2020
+
+NOTE: PROCEDURE REG used (Total process time):
+      real time           0.06 seconds
+      cpu time            0.03 seconds
+      
+
+67         
+68         
+69         /*2) DIAGNOSTICHE DI INFLUENZA*/
+70         
+71         title "REG: diagnostiche di influenza";
+72         ods graphics on;
+73         proc reg
+74         /* OPZIONI PER LA VISUALIZZAZIONE DEI RISULTATI:*/
+75         data=PM_10;
+76         	  mod1: model  pm10 = cars temp  wind  / INFLUENCE;
+77         	  mod2: model  pm10 = cars temp  wind D_TEMP HOURS / INFLUENCE;
+78         	  /*Opzione 'influence': per il calcolo delle varie statistiche di influenza,
+79         	  	come i resid_residui studentizzati e i valori 'leverage'. Permettono di
+80         	    stabilire l'influenza di ciascuna unità sulle stime dei parametri.*/
+81         	  run;
+
+ERROR: User asked for termination
+NOTE: The SAS System stopped processing this step because of errors.
+NOTE: The PROCEDURE REG printed pages 5-17.
+NOTE: PROCEDURE REG used (Total process time):
+      real time           5.67 seconds
+      cpu time            0.40 seconds
+      
+82         ods graphics off;
+83         
+84         /* PER LO STUDIO DEI LEVERAGES:
+85         Valore soglia: 2p/n, dove p= n.ro di parametri nel modello (intercetta inclusa) e n = n.ro
+85       ! di unità.
+86         Nel caso del modello 1: p=5, n=500, da cui: 2p/n = 0.02.
+87         
+88         Le osservazioni a cui corrisponde un leverage che supera la soglia dovrebbero essere
+88       ! analizzate ulteriormente.
+89         
+90         N.B.: per l'indicazione dei valori soglia sulle altre statistiche di influenza
+91         consultare l'help on-line di SAS.
+92         */
+93         
+94         title "REG: grafici per le diagnostiche di influenza";
+
+
+95         proc reg data=PM_10;
+96         	 /*mod1: Modello a tre regressori*/
+97         	 mod1: model  pm10 = cars temp  wind   / INFLUENCE noprint;
+98         	  /* Statement 'output': per salvare come file di dati esterni le principali
+99         	     statistiche diagnostiche:
+100        	  		h=per i leverages;
+101        	  		covratio=per l'influenza sul determinante della matrice di var-cov;
+102        	  		student=per i resid_residui studentizzati;
+103        	     	rstudent=per i resid_residui studentizzati 'jackknife';
+4                                           The SAS System               21:42 Thursday, March 5, 2020
+
+104        	     	dffits=per la misura dell'influenza della singola osservazione sulla previsione dei
+104      ! valori della variabile dipendente.
+105        	  */
+106        	  output out=PM_10Diagn
+107        				h=hatdiag
+108        				covratio=cov_rat
+109        				rstudent=rst_res
+110        				dffits=pred_infl;
+111        	  run;
+
+112        	  quit;
+
+NOTE: The data set USER.PM_10DIAGN has 500 observations and 11 variables.
+NOTE: PROCEDURE REG used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.01 seconds
+      
+
+113        
+114        /*GRAFICI PER IDENTIFICARE LE UNITA'*/
+115          goptions reset=(symbol);
+116          symbol1 i=needle;
+117          /*INTERPOL=NEEDLE: draws a vertical line from each data point to a horizontal line at the
+117      !  0 value
+118            on the vertical axis or the minimum value on the vertical axis. The horizontal line is
+118      ! drawn automatically.
+119          */
+120          axis1 label=none
+121              order = 1 to 500 by 10
+122              offset=(2);
+123        
+124          axis2 label=(angle=90);
+125        
+126         /*OFFSET=(<n1><,n2>)<units > | (<n1<units>><,n2<units>>)
+127           specifies the distance from the first and last major tick marks or bars to the ends of
+127      ! the axis line.
+128          */
+129        
+130           title 'Leverage plot';
+131           proc gplot data=PM_10Diagn;
+132           plot hatdiag*id_road=1 / vref=0.02 cvref=red lvref=3
+133                               haxis=axis1 hminor=0;
+134           /*HMINOR=number-of-minor-ticks: specifies the number of minor tick marks drawn between
+135        					                each major tick mark on the horizontal axis. */
+136           run;
+
+NOTE: 9 observation(s) outside the axis range for the hatdiag * id_road request.
+137           quit;
+
+NOTE: There were 500 observations read from the data set USER.PM_10DIAGN.
+NOTE: PROCEDURE GPLOT used (Total process time):
+      real time           4.69 seconds
+      cpu time            0.28 seconds
+      
+5                                           The SAS System               21:42 Thursday, March 5, 2020
+
+
+138        
+139        
+140           title 'Studentized resid_roadual - jackknife';
+141           proc gplot data=PM_10Diagn;
+142           plot rst_res*id_road=1 / vref=-2 2 cvref=(red red) lvref=3
+143                               haxis=axis1 hminor=0
+144                               vaxis=axis2 vminor=0;
+145           run;
+
+NOTE: 9 observation(s) outside the axis range for the rst_res * id_road request.
+NOTE: There were 500 observations read from the data set USER.PM_10DIAGN.
+NOTE: PROCEDURE GPLOT used (Total process time):
+      real time           2.65 seconds
+      cpu time            0.11 seconds
+      
+
+ERROR: Errors printed on page 3.
+
+NOTE: SAS Institute Inc., SAS Campus Drive, Cary, NC USA 27513-2414
+NOTE: The SAS System used:
+      real time           14.14 seconds
+      cpu time            1.37 seconds
+      

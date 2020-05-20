@@ -1,0 +1,540 @@
+/*************************************************************/
+/*---------------- MODELLI MULTILIVELLO ---------------------*/
+/*************************************************************/
+
+
+/***********  SAS 9.4 **********/
+
+/*
+++ Testo di riferimento per il software SAS: Manuale SAS/STAT:
+http://support.sas.com/documentation/onlinedoc/stat/index.html#stat121
+http://support.sas.com/documentation/cdl/en/statug/66103/HTML/default/viewer.htm#titlepage.htm
+http://support.sas.com/documentation/cdl/en/statug/66103/PDF/default/statug.pdf
+
+++ Altri manuali sono disponibili alla pagina:
+http://support.sas.com/documentation/94/index.html
+*/
+
+
+/* DIRECTORY DI LAVORO: */
+/*Modificare inserendo il percorso opportuno:*/
+
+LIBNAME User 'C:\Users\utoh\Dropbox\Insegnamenti\Modelli Lineari Generalizzati\Esercitazioni\7_Multilevel\Codici di SAS MULTILEV e dati-20161227'; run;
+
+
+/*APRIRE LA VISUALIZZAZIONE DELL'OUTPUT IN HTML*/
+
+
+/*************************************************************/
+/*---------------- MODELLI MULTILIVELLO ---------------------*/
+/*************************************************************/
+/*Importazione del file 'nlschools.txt' come 'File delimitato'*/
+
+/* DATASET DESCRIPTION:
+
+This dataset contains 2287 rows and the following columns: 
+lang = language test score (dependent variable)
+IQ = Verbal IQ 
+class = class ID (133 classi in tutto)
+GS = Class size: number of eighth-grade pupils recorded in the class 
+   (there may be others: see COMB, and some may have been omitted with missing values). 
+SES = Social-economic status of pupil's family. 
+COMB = were the pupils taught in a multi-grade class (0/1)? 
+   Classes which contained pupils from grades 7 and 8 are coded 1, but only eighth-graders were tested. 
+
+Ruolo delle variabili:
+ 
+lang = variabile dipendente di primo livello;
+IQ = variabile indipendente di primo livello;
+SES = variabile indipendente di primo livello;
+GS = variabile indipendente di secondo livello;
+COMB = variabile indipendente di secondo livello.
+   */
+
+title 'Eighth-Grade Pupils in the Netherlands';
+data nlschools;
+set nlschools;
+label lang = "language test score" 
+      IQ = "verbal IQ"
+	  class = "class ID"
+	  GS = "class size"
+	  SES = "family socio-economic status"
+	  COMB= "dummy of multi-grade class";
+run;
+
+proc print data=nlschools(obs=10) label; 
+run;
+
+/*---------- ANALISI PRELIMINARE ---------*/
+
+/*Distribuzione di frequenze delle classi*/
+proc freq data=nlschools nlevels;
+/*
+'nlevels'= per visualizzare il numero di livelli (=valori o categorie)
+           della variabile di cui si costruisce la distribuzione di frequenze.
+*/
+table class;
+run;
+
+/*Determinazione degli indici di statistica descrittiva*/
+title2 'Descriptive indices';
+ proc means data= nlschools;
+ run;
+/*n.b.: poiche' nel file di origine le colonne "id", "class", "COMB" 
+contengono valori scritti fra virgolette, sono interpretate automaticamente da SAS
+come variabili in formato stringa. Pertanto non vengono coinvolte nel computo
+degli indici di statistica descrittiva.*/
+
+/*Determinazione delle medie di gruppo*/
+ proc means data= nlschools;
+ class class /ascending;
+ run;
+
+/*Matrice di correlazione*/
+title2 'Correlation matrix';
+proc corr data=nlschools; 
+run;
+
+
+/* BOXPLOTS di lang entro classi*/
+/*Procedura preliminare: ordinamento dei dati in base a 'class'*/
+title2 'Box plots of lang distribution within classes';
+ proc sort data=nlschools;
+by class;
+run;
+
+   proc boxplot data=nlschools;
+      plot lang*class;
+      inset nobs mean / header = 'Overall Stats' pos=sw;
+   run;
+
+
+/*------------------- MODELLI MULTILIVELLO CON PROC MIXED --------------------*/
+
+/* SINTASSI ESSENZIALE:
+
+PROC MIXED < options > ; 
+CLASS variables ; 
+ID variables ; 
+MODEL dependent = < fixed-effects > < / options > ; 
+RANDOM random-effects < / options > ; 
+*/
+
+/*-------- Modello preliminare: 1-way ANOVA ad effetti fissi ------------*/
+   /*N.B.: non si tratta di un modello multilivello, poiche' in esso
+   la struttura gerarchica dei dati, in questo caso a due livelli, 
+   non viene rappresentata mediante l'introduzione degli effetti casuali.
+   Tuttavia puo' rappresentare un passo preliminare importante
+   per comprendere al meglio le analisi successive. 
+   La procedura MIXED permette comunque di costruire anche modelli che
+   contengono solo effetti fissi. */
+
+title '1-way fixed-effects ANOVA';
+proc mixed data = nlschools;
+  class class;
+  model lang = class / solution chisq cl;
+ /*Alcune opzioni dello statement 'model':
+  'solution' = per visualizzare le stime degli effetti fissi;
+  'chisq' = per visualizzare i test di significativita' per gli effetti fissi;
+  'cl' = per visualizzare gli intervalli di confidenza per gli effetti fissi basati sulla
+         statistica t di Student.
+  */
+run;
+
+
+/*--- Costruzione di alcuni modelli multilivello ---*/
+/*-------- Empty model: 1-way ANOVA ad effetti casuali ------------*/
+
+title 'Empty model';
+proc mixed data = nlschools cl covtest noitprint;
+/* Alcune opzioni:
+'cl' = per visualizzare gli intervalli di confidenza per le componenti di varianza
+		(metodo di Wald, basato sulla distribuzione Chi-Quadrato);
+'covtest' = per visualizzare gli standard error asintotici e il test Z di Wald per
+            le componenti di varianza;
+'noitprint' = per sopprimere in output la visualizzazione della cronologia delle iterazioni.
+'method=' = per specificare il metodo di stima. Per default è REML (REstricted Maximum Likelihood).
+            Altra possibile opzione: ML.
+*/
+  ods output SolutionR =RandomEffects;
+  /*'ods output SolutionR=' = per salvare in un file di dati esterni le previsioni BLUP degli
+     effetti casuali con gli intervalli di previsione.*/
+  class class;
+  model lang =  / solution chisq cl;
+  random intercept / subject = class type = un solution cl;  
+ /*Alcune opzioni dello statement 'random' (per indicare i parametri casuali del modello):
+  'subject=' = per specificare l'unità di secondo livello; 
+  'type=' = per specificare il tipo di struttura della matrice di var-cov degli effetti casuali.
+            Opzione: 'un'= matrice di var-cov non strutturata;
+  'solution' = per visualizzare le previsioni puntuali degli effetti casuali, ossia i valori previsti
+               dei residui di secondo livello;
+  'cl' = per visualizzare gli intervalli di confidenza per gli effetti casuali costruiti con
+         la distributione t di Student.
+  */
+run;
+quit;
+
+
+/*ANALISI SUGLI EFFETTI CASUALI (spesso sono interpretati come un "parametro" di efficacia o di efficienza
+  delle unita' di secondo livello, in questo caso le classi.)*/
+proc print data=RandomEffects(obs=9);
+run;
+/* Estimate Lower Upper */
+
+/*Con l'obiettivo di costruire un grafico che riporti i valori previsti
+degli effetti casuali e i loro intervalli di previsione, il dataset "RandomEffects"
+viene ordinato in senso crescente rispetto alle previsioni degli effetti casuali.
+In questo modo verranno evidenziate le classi dall'efficacia superiore rispetto
+al Language Test Score.*/
+
+ proc sort data=RandomEffects;
+by Estimate;
+run;
+
+
+/*Per comodita' si costruisce una colonna con l'ID delle classi
+ordinato rispetto alle previsioni ottenute degli effetti casuali.*/
+data RandomEffects;
+set RandomEffects;
+ID =_N_;
+run;
+
+proc print data=RandomEffects(obs=9);
+run;
+
+
+/*--- HIGH-LOW PLOT ----*/
+/*1. Prepare the data for a high-low plot. 
+RANEFF generates three records for each CLASS, storing each classes' high, low, and estimate values 
+in variable raneff. */
+
+data RanEff;
+   set RandomEffects;
+   drop Alpha DF Effect Estimate Lower Probt StdErrPred Upper tValue;
+   raneff=Upper; output;
+   raneff=Lower; output;
+   raneff=Estimate; output;
+run;
+
+proc print data=RanEff(obs=9);
+run;
+
+/*2. Define titles and footnote. 
+JUSTIFY=RIGHT in the FOOTNOTE statement causes the footnote to be displayed in the bottom right. */
+
+goptions reset=all;
+title1 "Random-Effects Prediction - 1-way Random-effects ANOVA";
+title2 "Class Efficacy on the Language Test Score";
+footnote justify=right "NLSCHOOLS ";
+
+/*3. Define symbol characteristics. 
+INTERPOL=HILOCTJ specifies that the minimum and maximum values of RANEFF are joined 
+by a vertical line with a horizontal tick mark at each end. 
+The Estimate values are joined by straight lines. The CV= option controls the color of the symbol (vertical axis). 
+The CI= and WIDTH= options control the color and the thickness of the line that joins the Estimates points. */
+
+symbol interpol=hiloctj
+       cv=black
+       ci=blue
+       width=1.25;
+
+/*4. Define characteristics of the horizontal axis. 
+	   The ORDER= option uses a SAS date value to set the major tick marks. 
+	   The OFFSET= option moves the first and last tick marks to make room for the tick mark value. */
+
+axis1 order=(1 to 133 by 2)
+      offset=(3,3)
+      label=("ID classes");
+
+/*5. Define characteristics of the vertical axis. 
+	  LABEL=NONE suppresses the AXIS label. */
+
+axis2 label=none
+      offset=(2,2);
+
+/*6. Generate the plot and assign AXIS definitions. 
+The HAXIS= option assigns AXIS1 to the horizontal axis, 
+	  and the VAXIS= option assigns AXIS2 to the vertical axis. */
+
+proc gplot data=raneff;
+   plot raneff*ID /  haxis=axis1 vaxis=axis2 vref=0 lvref=2;
+run;
+quit;
+goptions reset=all;
+
+
+/*---------- Random intercept model con una var. esplicativa: IQ ----------*/
+
+title 'Random-intercept model';
+  proc mixed data = nlschools cl covtest noitprint;
+  ods output SolutionR = RandomEffects2;
+  class class;
+  model lang = 	IQ / solution chisq cl;
+  random intercept / subject = class type = un solution cl;  
+  run;
+  quit;
+
+/*High-Low Plot*/
+proc sort data=RandomEffects2;
+by Estimate;
+run;
+
+data RandomEffects2;
+set RandomEffects2;
+ID2 =_N_;
+run;
+
+
+data RanEff2;
+   set RandomEffects2;
+   drop Alpha DF Effect Estimate Lower Probt StdErrPred Upper tValue;
+   raneff=Upper; output;
+   raneff=Lower; output;
+   raneff=Estimate; output;
+run;
+
+
+title1 "Random-Effects Prediction";
+title2 "Class Efficacy on the Language Test Score - Rnd-Intc model with IQ";
+footnote justify=right "NLSCHOOLS ";
+
+symbol interpol=hiloctj
+       cv=black
+       ci=blue
+       width=1.25;
+
+axis1 order=(1 to 133 by 2)
+      offset=(3,3)
+      label=("ID classes");
+axis2 label=none
+      offset=(2,2);
+
+
+proc gplot data=raneff2;
+   plot raneff*ID2 /  haxis=axis1 vaxis=axis2 vref=0 lvref=2;
+run;
+quit;
+
+goptions reset=all;
+
+
+/*--------- Random intercept model con due var. esplicative: IQ e SES ------------*/
+title 'Random-intercept model';
+  proc mixed data = nlschools cl covtest noitprint;
+  ods output SolutionR = RandomEffects3;
+  class class;
+  model lang = 	IQ SES / solution chisq cl;
+  random intercept / subject = class type = un solution cl;  run;
+
+
+ /*------- Random-coefficients model: IQ random -----------------*/
+  title 'Random-coefficient model with IQ';
+  proc mixed data = nlschools cl covtest noitprint;
+  ods output SolutionR = RandomEffects4;
+  class class;
+  model lang = 	IQ SES / solution chisq cl;
+  random intercept IQ / subject = class type = un solution cl;  run;
+
+ /*High-Low Plots*/
+/*Separazione in due del dataset "RandomEffects4":
+1. Dataset che riporta le previsioni per l'effetti casuali associati all'intercetta (RanEff_Intc);
+2. Dataset che riporta le previsioni per l'effetti casuali associati al coefficiente di regressione
+   di IQ (RanEff_IQ).
+*/
+data RanEff_Intc;
+set RandomEffects4;
+if Effect="IQ" then delete;
+run;
+
+data RanEff_IQ;
+set RandomEffects4;
+if Effect="Intercept" then delete;
+run;
+
+/*High-plot per gli effetti casuali dell'intercetta*/
+proc sort data=RanEff_Intc;
+by Estimate;
+run;
+
+data RanEff_Intc;
+set RanEff_Intc;
+ID4 = _N_;
+run;
+
+
+data RanEff_Intc2;
+   set RanEff_Intc;
+   drop Alpha DF Effect Estimate Lower Probt StdErrPred Upper tValue;
+   raneff_intc=Upper; output;
+   raneff_intc=Lower; output;
+   raneff_intc=Estimate; output;
+run;
+
+
+title1 "Random-Effects Prediction for the Intercept";
+title2 "Class Efficacy on the Language Test Score - Rnd-Coeff model with IQ";
+footnote justify=right "NLSCHOOLS ";
+
+symbol interpol=hiloctj
+       cv=black
+       ci=blue
+       width=1.25;
+
+axis1 order=(1 to 133 by 2)
+      offset=(3,3)
+      label=("ID classes");
+axis2 label=none
+      offset=(2,2);
+
+
+proc gplot data=RanEff_Intc2;
+   plot raneff_intc*ID4 /  haxis=axis1 vaxis=axis2 vref=0 lvref=2;
+run;
+quit;
+goptions reset=all;
+
+
+/*High-Low plot per gli effetti casuali del coefficiente di regressione di IQ*/
+proc sort data=RanEff_IQ;
+by Estimate;
+run;
+
+data RanEff_IQ;
+set RanEff_IQ;
+ID5 = _N_;
+run;
+
+
+data RanEff_IQ2;
+   set RanEff_IQ;
+   drop Alpha DF Effect Estimate Lower Probt StdErrPred Upper tValue;
+   raneff_coeff=Upper; output;
+   raneff_coeff=Lower; output;
+   raneff_coeff=Estimate; output;
+run;
+
+
+title1 "Random-Effects Prediction for the Regr.Coeff. of IQ";
+title2 "Class Efficacy on the Language Test Score - Rnd-Coeff model with IQ";
+footnote justify=right "NLSCHOOLS ";
+
+symbol interpol=hiloctj
+       cv=black
+       ci=blue
+       width=1.25;
+
+axis1 order=(1 to 133 by 2)
+      offset=(3,3)
+      label=("ID classes");
+axis2 label=none
+      offset=(2,2);
+
+proc gplot data=RanEff_IQ2;
+   plot raneff_coeff*ID5 /  haxis=axis1 vaxis=axis2 vref=0 lvref=2;
+run;
+quit;
+goptions reset=all;
+
+
+ /*Random-coefficients model: IQ e SES random */
+  title 'Random-coefficient model with IQ and SES';
+  proc mixed data = nlschools cl covtest noitprint;
+  class class;
+  model lang = 	IQ SES / solution chisq cl;
+  random intercept IQ SES/ subject = class type = un solution cl;  
+  run;
+
+/*N.B.: nel file log compare il messaggio: 'Estimated G matrix is not positive definite',
+  ossia la matrice di var-cov degli effetti casuali non e' definitiva positiva.
+  Si nota in particolare che e' la struttura casuale associata a SES a creare problemi. 
+  Pertanto, questo modello non pare adeguato.
+*/
+
+  title 'Random-coefficients model, level-2 expl. var.';
+ /*Random-coefficients model: IQ random, GS level-2 espl. */
+  proc mixed data = nlschools cl covtest noitprint;
+  class class;
+  model lang = 	IQ SES GS/ solution chisq cl;
+  random intercept IQ / subject = class type = un solution cl;  run;
+
+
+  title 'Random-coefficients model, level-2 expl. var., cross-level int.';
+ /*Cross-level interaction, GS level-2 espl. */
+  proc mixed data = nlschools cl covtest noitprint;
+  ods output SolutionR = RandomEffects5;
+  class class;
+  model lang = 	IQ SES GS IQ*GS / solution chisq cl;
+  random intercept IQ / subject = class type = un solution cl;  run;
+
+/*Dall'analisi svolta il modello piu' adeguato appare il random-coefficients model
+  con intercetta e coeff. di regr. di IQ casuali e SES presente con un effetto fisso.*/
+
+   /*------- SELECTED MODEL -----------------*/
+  title 'Random-coefficient model with IQ';
+  title2 'Selected Model';
+  proc mixed data = nlschools cl covtest noitprint;
+  /*  ods output SolutionR = RandomEffects4; */
+  class class;
+  model lang = 	IQ SES / solution chisq cl;
+  random intercept IQ/ subject = class type = un solution cl;  run;
+
+  /*Confronto fra la previsione degli effetti casuali ottenuta con l'empty model
+  e quella ottenuta con il modello prescelto.*/
+
+  proc sort data=RanEff;
+  by class;
+  run;
+
+  proc sort data=RanEff_intc2;
+  by class;
+  run;
+
+  data RanEff_comparison;
+   merge RanEff RanEff_intc2;
+   by class;
+run;
+
+/*High-Low Plots sovrapposti per gli effetti casuali dell'intercetta*/
+/*Ordinamento in base ai risultati ottenuti con l'empty model ('by ID')*/
+proc sort data=RanEff_comparison;
+by ID;
+run;
+
+
+title1 "Random-Effects Prediction for the Intercept";
+title2 "Comparison between the empty model and the random-coefficients model with random IQ";
+title3 "Prediction intervals ordered according to the empty model results";
+footnote justify=right "NLSCHOOLS ";
+
+/*Definizione dei simboli per l'empty model*/
+symbol1 interpol=hiloctj
+       cv=black
+       ci=blue
+       width=2;
+
+/*Definizione dei simboli per il random-coefficient model*/
+symbol2 interpol=hiloctj
+       cv=grayc0
+       ci=red
+       width=2.5;
+
+axis1 order=(1 to 133 by 2)
+      offset=(3,3)
+      label=("ID classes");
+axis2 label=none
+      offset=(2,2);
+
+legend1 label=none value=("Rnd-coeff model" "Empty model")
+        position=(top left inside) frame across=2 offset=(,-1.5)
+        mode=share;
+
+
+proc gplot data=RanEff_comparison;
+   plot raneff_intc*ID=2 raneff*ID=1 / overlay haxis=axis1 vaxis=axis2 vref=0 lvref=2 legend=legend1;
+run;
+quit;
+goptions reset=all;
+
+
+
+
