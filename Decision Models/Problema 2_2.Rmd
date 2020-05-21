@@ -1,0 +1,127 @@
+---
+title: "Problema 2"
+author: "Alessandro Pontini"
+date: "4/29/2020"
+output: pdf_document
+---
+
+## Mappa concettuale del problema  
+
+![mappa Concettuale lavoro](/Users/alessandropontini/Downloads/problema2-1.png)
+
+![Idea di lavoro alla base](/Users/alessandropontini/Downloads/problema2-21.png)                                                            
+
+
+
+
+
+
+
+Vogliamo trovare quanti clienti possiamo servire minimizzando i costi relativi.  
+
+## Modello Risoluzione
+
+Sostanzialmente l'equazioni che andiamo a creare sono:  
+
+$$
+\begin{aligned}
+&\min \quad  6.5 x_{11}+7.0 x_{12}+8.25 x_{13}+7.5 x_{21}+8.0 x_{22}+7.25 x_{23}
++7.75 x_{24}+7.5 x_{25}+6.75 x_{31}+7.0 x_{32}+6.75 x_{33}\\\quad \\
+&x_{11}+ x_{12}+ x_{13} \leq 60000, \\
+&x_{21}+x_{22}+x_{23}+x_{24}+x_{25} \leq 70000,\\
+&x_{31}+x_{32}+x_{33}\leq 40000,\\
+&x_{11} + x_{21} = 30000\\
+&x_{12} + x_{22} = 40000\\
+&x_{13} + x_{23} + x_{33} = 25000\\
+&x_{24} + x_{34} = 35000\\
+&x_{25} + x_{35} = 33000\\
+&x_{11},x_{12},x_{13}x_{21},x_{22},x_{23},x_{24},x_{25},x_{31},x_{32},x_{33} \in\{0,Inf\}
+\end{aligned}
+$$
+
+```{r esercizio risolto, results='hide'}
+library(lpSolveAPI)
+
+x = data.frame(index_i=c(1,1,1, 2,2,2,2,2 ,3,3,3),
+               index_j =c(1,2,3, 1,2,3,4,5, 3,4,5), 
+               lb      =c(0,0,0,  0,0,0,0,0, 0,0,0),
+               ub      =c(Inf,Inf,Inf,Inf,Inf,Inf,Inf,Inf,Inf,Inf,Inf),
+               cost    =c(6.5,7,8.25,  7.5,8,7.25,7.75,7.50,  6.75,7,6.75))
+b =c(60000,70000,40000,  30000,40000,25000,35000,33000)
+
+model = make.lp(0,11)
+lp.control(model, sense="min")
+set.objfn(model,obj=x$cost)
+
+
+#x11 + x12 + x13 = 60000
+add.constraint(model,
+               xt=c(1,1,1),
+               type="<=",
+               rhs=b[1],
+               indices=c(1:3))  
+
+#x21 + x22 + x23 + x24 + x25  = 70000
+add.constraint(model,
+               xt=c(1,1,1,1,1),
+               type="<=",
+               rhs=b[2],
+               indices=c(4:8)) 
+
+# x33 + x34 + x35 = 40000
+add.constraint(model,
+               xt=c(1,1,1),
+               type="<=",
+               rhs=b[3],
+               indices=c(9:11)) 
+
+# x11 + x21 = 30000
+add.constraint(model,
+               xt=c(1,1),
+               type="=",
+               rhs=b[4],
+               indices=c(1,4)) 
+
+# x12 + x22 = 40000
+add.constraint(model,
+               xt=c(1,1),
+               type="=",
+               rhs=b[5],
+               indices=c(2,5))
+
+# x13 + x23 + x33 = 25000
+add.constraint(model,
+               xt=c(1,1,1),
+               type="=",
+               rhs=b[6],
+               indices=c(3, 6, 9))
+
+#  x24 + x34 = 35000
+add.constraint(model,
+               xt=c(1,1),
+               type="=",
+               rhs=b[7],
+               indices=c(7, 10))
+
+#  x25 + x35 = 33000
+add.constraint(model,
+               xt=c(1,1),
+               type="=",
+               rhs=b[8],
+               indices=c(8,11))
+
+set.bounds(model,lower=x$lb,upper=x$ub)
+
+solve(model)
+```
+
+```{r soluzioni}
+v <-get.variables(model)
+x <- cbind(x,y_val = v)
+x[c("index_i", "index_j", "y_val")]
+get.objective(model)
+```
+Trovo che la ottima soluzione che minimizza i costi è di $1.155.000$\$ e possiamo vedere come evolvono rapporti rispetto all'inizio con questo grafico.
+
+![mappa Concettuale lavoro finale](/Users/alessandropontini/Downloads/problema2finale.png)
+

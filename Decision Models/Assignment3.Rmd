@@ -1,0 +1,298 @@
+---
+title: "Assignment 3"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: tactile
+    highlight: github
+    toc: yes
+    includes:
+      after_body: footer.html
+---
+
+```{r librerie, results='hide', warning=FALSE}
+library(NLRoot)
+library(ggplot2)
+library(directlabels)
+library(ggplot2)
+library(grid)
+library(ggrepel)
+library(GenSA)
+library(numDeriv)
+```
+## **Problema 1**  
+Per rispondere inizio a studiare la funzione $$\mathbf{{f(x) = -x^3 + 4x^2 -2}}$$ vedendo che il dominio che essendo un polinomio è continuo su tutto $\mathbb{R}$. Successivamente controllo i limiti per la funzione che tende a $+\infty$ e $-\infty$ ed ottengo $$\mathbf{
+\begin{equation}
+  \lim_{x\to-\infty}f(x) = +\infty
+\end{equation}}
+$$
+
+$$\mathbf{
+\begin{equation}
+  \lim_{x\to+\infty}f(x) = -\infty
+\end{equation}}
+$$
+Successivamente calcolo la derivata prima e la derivata seconda della funzione ed ottengo rispettivamente, per la derivata prima: $\,f'(x) = -3x^2 + 8x\,$ che mi darà due punti di massimo e di minimo per $f'(x) = 0$. Infatti raccogliendo $x$ ottengo $\,x(-3x+8) = 0\,$ per cui ho $\,x = 0; y=-2\,$ e $\,x = \frac83; y=\frac{202}{27}\,$. Per la derivata seconda invece ottengo: $\,f''(x) = -6x + 8\,$ che mi porta a dire che il punto di flesso ascendente sarà per $x=\frac43, y=\frac{74}{27}$. La curva sarà prima convessa e poi concava. Tutte queste analisi rendono più chiaro che avremo sicuramente più di una intersezione per $y=0$. Infatti disegnando otteniamo:  
+
+```{r disegno 1 bi, echo=FALSE}
+func <- function(x){
+  -x^3 + 4 * x^2 - 2
+}
+
+p <- ggplot(data = data.frame(x = 0), mapping = aes(x = x))
+p + stat_function(fun = func) + xlim(-1,4) +
+  geom_hline(yintercept=0, color = "blue", size=1) +
+  geom_vline(xintercept = 0, 
+                color = "blue", size=1)
+
+```
+  
+Uso adesso il metodo della **Bisezione** per trovare le  intersezioni per $\mathbf{y = 0}$. Decido per comodità di concentrarmi sul trovare un punto analiticamente ma il processo poteva essere fatto per trovare tutti e tre i punti di intersezione e farò solo una iterazione però spiegando come si doveva continuare. Prendo l'intervallo $\mathbf{(3,5)}$ della funzione. Ottenendo:
+
+```{r disegno2 bi, warning=FALSE,echo=FALSE}
+p <- ggplot(data = data.frame(x = 0), mapping = aes(x = x))
+p + stat_function(fun = func) + xlim(0,5)+ ylim(-29, 10)+
+  geom_hline(yintercept=0, color = "blue", size=1) +
+  geom_vline(xintercept = 3, 
+                color = "yellow", size=1) +
+   geom_vline(xintercept = 5, 
+                color = "green", size=1) +
+  geom_vline(xintercept = 0, 
+                color = "blue", size=1)+
+  geom_point(x=3, y=7, color = "red", size=2)+ 
+  geom_point(x=5, y=-27, color = "red", size=2)
+```
+  
+Decido quindi di trovare il punto medio sostituendo alla formula  $x_{m} = \frac{a+b}{2}$ rispettivamente 5 e 3, ottenendo che $\mathbf{x_{m} =  4}$ sostituisco poi nella $f(x)$ ed ottengo $f(m) = -2$ mentre ottengo per $\mathbf{f(3) = +7}$ e $\mathbf{f(5) = -27}$. 
+
+```{r disegno 3 bi, warning=FALSE,echo=FALSE}
+p <- ggplot(data = data.frame(x = 0), mapping = aes(x = x))
+p + stat_function(fun = func) + xlim(0,5)+ ylim(-29, 10)+
+  geom_hline(yintercept=0, color = "blue", size=1) +
+  geom_vline(xintercept = 3, 
+                color = "yellow", size=1) +
+   geom_vline(xintercept = 5, 
+                color = "green", size=1) +
+  geom_vline(xintercept = 0, 
+                color = "blue", size=1) +
+    geom_vline(xintercept = 4, linetype="dashed",
+                color = "pink", size=1)+
+  geom_point(x=3, y=7, color = "red", size=2)+ 
+  geom_point(x=5, y=-27, color = "red", size=2)+
+  geom_point(x=4, y=-2, color = "red", size=2)
+```
+  
+A questo punto secondo il teorema di **Bolzano** sappiamo che se $\mathbf{f(a)\space o\space f(b)}$ hanno segno uguale devo re-iterare l'operazione appena fatta sostituendo l'estremo con il punto medio. Adesso infatti avendo che $\mathbf{f(b)\space e\space f(m)}$ hanno identico segno andrò a trovare il nuovo punto medio con questi valori $\mathbf{x=(3,4)}$. Questo procedimento va avanti finchè arrivo ad una convergenza con $\mathbf{f(x) = 0}$. Utilizzo la libreria **NLRoot** per calcolare le soluzioni per cui $\mathbf{y = 0}$.  
+
+```{r risultati}
+BFfzero(func, -2, 10)
+```
+  
+Ed ottengo perciò 3 soluzioni trovando inoltre anche la nostra abbozzata per cui iterando diverse volte avremmo trovato $\mathbf{x=3.8662\space e\space y=0}$
+
+```{r disegno 4 finale,echo=FALSE}
+p <- ggplot(data = data.frame(x = 0), mapping = aes(x = x))
+p + stat_function(fun = func) + xlim(-1,4) +
+  geom_hline(yintercept=0, color = "blue", size=1) +
+  geom_vline(xintercept = 0, 
+                color = "blue", size=1) + 
+  geom_point(x=3.8662, y=0, color = "red", size=2)+ 
+  geom_point(x=0.789241, y=0, color = "red", size=2)+ 
+  geom_point(x=-0.6554428, y=0, color = "red", size=2)+
+    geom_vline(xintercept = 3.8662, linetype="dashed",
+                color = "red", size=1)+
+    geom_vline(xintercept = 0.789241, linetype="dashed",
+                color = "red", size=1)+
+    geom_vline(xintercept = -0.6554428, linetype="dashed",
+                color = "red", size=1)
+```
+  
+## **Problema 2**  
+#### **1) Compito (a)**  
+
+Presa la funzione $$\mathbf{2x_1^2 + x_1 x_2\space+ 2(x_2 - 3)^2}$$  dobbiamo utilizzare la discesa del Gradiente per minimizzare la funzione. Per farlo abbiamo bisogno di ricavarci le derivare parziali di $x_1$ e $x_2$ e creare perciò il gradiente così: $$\nabla f(x_1, x_2) = [4x_1 + x_2,\space x_1+4x_2 -12]$$.  
+Ci viene dato il punto $A=(-1,4)^T$ che andando  a sostituire nel **gradiente** otteniamo il vettore: $$\nabla f(A) = [0,\space 3]$$.  A questo punto dobbiamo scegliere un errore $\epsilon$ per cui se la norma del gradiente nel punto é minore di questo $\epsilon$ allora abbiamo raggiunto il minimo. $$||\nabla f(A)||= \sqrt{0 + (3)^2} < \epsilon$$  L'errore $\epsilon$ è arbitrario e quindi non accettando la ipotesi di soddisfazione del criterio proviamo fare una iterazione, pertanto poichè stiamo cercando il minimo inserisco $$d_0 = -\nabla f(A) = [0,-3]$$ nella formula $$x_{k+1} = x_k + a_kd_k$$ ottenendo pertanto $$B = [-1,4] + a_0[0,-3]$$ cioè $$ B = [-1,4-3a_0]$$ Sostituisco nella equazione di partenza esi ha $$\nabla f(B) = 18a_{0}^2 -9a_0$$ per cui facendo la derivata prima ottengo $$ \nabla f'(B) = 36a_{0} -9$$ cioè $a_0 = \frac14$. Sostituendo $ a_0$ ho $$ B = [-1,\space\frac{13}{4}]$$ che se uso per calcolare il gradiente ottenendo così$$ \nabla f(B) = [4(-1) + (\frac{13}{4}),\space (-1)+4(\frac{13}{4}) -12] = [-\frac{3}{4}, 0]$$ A questo punto ci serve ricalcolare la norma così da vedere se abbiamo raggiunto il valore ottimale di $ \epsilon$ per cui $$ ||\nabla f(x_k)|| < \epsilon$$   $$ ||\nabla f(B)||= \sqrt{(-\frac{3}{4})^2 + 0} < \epsilon$$. Notiamo come dal calcolo precedente per cui $sqrt{0 + (3)^2} =3$ siamo arrivati ad un  $\sqrt{(-\frac{3}{4})^2 + 0} \approx 0.75$ che ancora non ci soddisfa.  Iterando potremmo sempre di più avvicinarci a $\epsilon \approx 0$.  
+
+#### **2) Compito (b)**  
+Nel compito B si chiede di minimizzare ancora una volta la funzione $$\mathbf{2x_1^2 + x_1 x_2\space+ 2(x_2 - 3)^2}$$ ma questa volta utilizzando il metodo di Newton. Pertanto una volta calcolate le derivate parziali come nel punto precedente ottenendo perciò il gradiente  $$\nabla f(x_1, x_2) = [4x_1 + x_2,\space x_1+4x_2 -12]$$ dobbiamo calcolarci la **matrice Hessiana** con i coefficienti delle $\mathbf{x_1,x_2}$. Quindi si ha: $$H=\begin{bmatrix}
+    4 & 1\\
+    1 & 4
+\end{bmatrix}$$
+Successivamente dobbiamo calcolarci la matrice inversa dell Hessiana, ma dobbiamo controllare che $\mathbf{det(H) \neq 0}$ perciò $$det(H) = 4*4 -(1*1) = 15 \neq 0$$. Dimostrato il determinante diverso da 0 utilizzo il software R per calcolarmi la matrice.  
+
+```{r}
+H <- cbind(c(4,1), c(1,4))
+inversH <- solve(H)
+inversH 
+```
+  
+Ottenendo una matrice sempre simmetrica con $$H^{-1} \approx\begin{bmatrix}
+    0.267 & -0.067\\
+   -0.067 &  0.267
+\end{bmatrix}$$ Prendendo ora il punto $\mathbf{A=(-1,4)^T}$ e calcolando il gradiente $\mathbf{\nabla f(A) = [0,\space 3]}$ possiamo utilizzare il metodo di Newton che **approssima la funzione con una quadratica** nell'intorno con una la serie di Taylor al secondo ordine. Ottenendo perciò l'approssimazione al punto successivo per: $$x_{k+1} =x_k -H(x_k)^{-1}\nabla f(x_k)$$ cioè nel nostro caso: $$B = \begin{bmatrix}
+  -1 \\
+   4 
+\end{bmatrix} - \begin{bmatrix}
+    0.267 & -0.067\\
+   -0.067 &  0.267
+\end{bmatrix} * \begin{bmatrix}
+  0 \\
+  3 
+\end{bmatrix} = \begin{bmatrix}
+  -0.8 \\
+   3,2
+\end{bmatrix}$$ per cui otteniamola il minimo avendo il **gradiente a 0**: $$\mathbf{\nabla f(B) = [0,0]}$$
+
+```{r disegno 1_2, echo=FALSE}
+func <- function (x, y) {
+  return (2 * x^2 + x * y + 2 * (y - 3)^2)
+}
+
+x <- seq(-10, 10, length= 30)
+y <- x
+z <- outer(x, y, func)
+z[is.na(z)] <- 1
+
+nofColors <- 100;
+colorFunc <- colorRampPalette(c('red', 'blue'));
+colors_   <- colorFunc(nofColors);
+
+z.centerValues <- (
+  z[      -1  ,      -1  ] +
+    z[      -1  , -ncol(z) ] +
+    z[ -nrow(z) ,      -1  ] +
+    z[ -nrow(z) , -ncol(z) ]
+) / 4
+
+z.colorBin <- cut(z.centerValues, nofColors);
+
+persp(x, y, z,
+      main="Prospettiva Funzione",
+      zlab = "Height",
+      theta =200, phi = 15, shade = 0.5, col    =  colors_[z.colorBin], scale = T)
+
+```
+  
+Notiamo come dal disegno la funzione ci offra una prospettiva di convessità rispetto alla retta delle Z pertanto ci aspettiamo che il valore trovato sia **minimo globale** e non **semplicimente locale**. 
+```{r disegno 1_3, echo=FALSE}
+image(x,y,z)
+```
+  
+Anche da questo disegno possiamo notare come effettivamente per il punto $B=(-0.8,3.2)$ ci troviamo al centro della regione più chiara che indica appunto il minimo.  
+
+
+#### **3) Compito (c)**  
+
+Il metodo di **Newton** utilizza la seconda derivata pertanto è capace di trovare il punto di ottimo solamente con una iterazione se la funzione è una quadratica. Per cui nel nostro caso funziona perfettamente. 
+
+## **Problema 3**  
+Per risolvere la funzione: $$\mathbf{f(x)=34exp^{-\frac12(\frac{x-88}{2})^2} + ( \frac{x}{10} -2sin(\frac{x}{10}))^2}$$
+Decido perciò di crearmi una funzione in R che presa la funzione esegue per un intervallo il metodo di Simulated Annealing.  
+
+```{r codice SA}
+func2 <- function(x) {
+  34*(exp(1))^(-0.5*((x-88)/2)^2) + ((x/10) -2*sin(x/10))^2
+}
+epsilon <- function(y,y_old,temp) {
+  exp(1)^(-(y - y_old)/temp)
+}
+
+setClass(Class="Risultati",
+         representation(
+            soluzione_finale = "numeric",
+            possibili_max = "data.frame",
+            possibili_minimi = "data.frame"
+          )
+)
+
+simulated_annealing <- function(fun, xmin, xmax){
+  temp0 = 1000
+  xott = xmin 
+  yott = fun(xmin)
+  
+  xempsilon = xmin
+  yepsilon = fun(xmin)
+
+  xprob <- data.frame("X" = numeric(), "Y" = numeric(),stringsAsFactors = FALSE)
+  xprob[nrow(xprob) + 1,] = c(xott,yott)
+  minimi <- data.frame("X" = numeric(), "Y" = numeric(),stringsAsFactors = FALSE)
+  for(i in xmin:xmax){
+    x_new = i
+    y_new = fun(i)
+    #calcolo minimi
+    z <- grad(func2, x_new)
+    if(z <= 0.01 & z >= -0.01){
+      minimi[nrow(minimi) + 1,] = c(x_new,y_new)
+    }
+    if(yott >= y_new ){
+      # mi salvo le soluzioni ottimali
+      yott = y_new
+      xott = x_new
+      temp0 = temp0 - 20  #diminuisco temp
+    } else {
+      random <- runif(1, 0 ,10)
+      if(yott < y_new){
+        if(random < epsilon(y_new,yepsilon,temp0)){
+          xprob[nrow(xprob) + 1,] = c(x_new,y_new)
+          temp0 = temp0 - 40  #diminuisco temp
+      }
+      }
+    }
+    xempsilon = i
+    yepsilon = fun(i)
+  }
+  print(paste0("Minimo Globale è in: (",xott,",",yott,")"))
+  return(new( "Risultati",
+              soluzione_finale= c(xott,yott),
+              possibili_max = xprob,
+              possibili_minimi = minimi))
+}
+
+result <- simulated_annealing(func2, -100,100)
+```
+
+
+```{r df, include=FALSE, results='hide', echo=FALSE}
+df <- result@possibili_max
+df <-  as.data.frame(df)
+df <- df[-c(1), ]
+```
+
+```{r df1,include=FALSE, results='hide', echo=FALSE}
+df1 <- result@possibili_minimi
+df1 <-  as.data.frame(df1)
+```
+
+
+```{r disegno SA, echo=FALSE}
+p <- ggplot(data = data.frame(x = 0), mapping = aes(x = x))
+
+p + stat_function(fun = func2, size=1.5) + xlim(-300,+300) +
+  geom_vline(xintercept = 0, 
+                color = "blue", size=1) + 
+  geom_vline(xintercept = 100, linetype="dashed",
+                color = "red", size=1)+
+  geom_vline(xintercept = -100, linetype="dashed",
+                color = "red", size=1) +
+  annotate("text", x =70 ,y = 250, label = "Punto di Minimo", size=3.6) +
+  annotate("segment", x = 50, xend = 10, y = 200, yend = 30,
+  colour = "black") +
+  geom_point(data=df, x=df$X, y=df$Y, shape=4, col=3, size=2)+
+  geom_point(data=df1, x=df1$X, y=df1$Y, shape=19, col="yellow", size=2)+
+  geom_point(x=0, y=0, color = "red", size=2, shape=17) +
+  annotate("text", x =130 ,y = 10, label = "+100", size=3.6, col=2) +
+  annotate("text", x =-130 ,y = 10, label = "-100", size=3.6, col=2) 
+```
+  
+Dal disegno nell'intervallo $\mathbf{(-100,+100)}$ si può notare come effettivamente il **minimo è effettivamente in 0**. I punti in verde sono quelli quando si ha $$\mathbf{f(x_{k+1}) > f(x_{k})}$$ si va a vedere se preso un numero random si ha: $\mathbf{random < \epsilon}$. Nel mio caso prendo random tra 0 a 10 mentre la $\mathbf{\epsilon}$ tramite la distribuzione di **Boltzman** viene calcolata in questo modo: $$\mathbf{\epsilon = [\frac{fx_{k+1}-fx_{k}}{T_{k+1}}]}$$ Dove $\mathbf{T_{k+1}}$ è la **Temperatura** che io prendo arbitrariamente a 1000 e calcolo un decremento per ogni punto analizzato. Così facendo sarà sempre più difficile per eventuali nuovi punti essere considerati in quanto la $\mathbf{\epsilon}$ aumenta. I punti gialli servono per mostrare dove la derivata prima è $\mathbf{\approx 0}$ nell'intervallo preso in cosiderazione.    
+Esiste un pacchetto in **R** chiamato **"GenSA"** che risolve propriamente al quesito di **Simulated Annealing**.
+
+```{r pacchetto GenSA}
+result2 <- GenSA(fn = func2, lower=c(-100), upper=c(100))
+final_par <- result2$par 
+final_result <- result2$value
+
+print(paste0("Punto di minimo della funzione: ", round(final_par,2), ":", round(final_result,2)))
+```  
+
+Verrebbero in realtà valori non propriamente a 0 **ma arrotondando sono uguali alla soluzione da me calcolata**.
