@@ -1,0 +1,807 @@
+---
+title: "Analisi Decessi Lombardia 2020 vs 2015:2019"
+author: "Alessandro Pontini, Stefano Biondi"
+date: "5/5/2020"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+### Dataset e Data Cleaning
+Il dataset analizzato è "Descrizione tracciato record dati comunali" dell'ISTAT sul numero di decessi in Italia per i mesi da Gennaio ad Aprile e per gli anni dal 2015 al 2020.  
+La prima modifica effettuata al dataset è stato unpivot dei dati per la classe sesso_anno. Sucessivamente le informazioni riguardo al genere e all'anno di raccolta del dato sono state separate in due differenti colonne, sono state create le colonne DATA, MESE e GIORNO.
+Infine sono state eliminate le colonne non più necessarie.  
+```{r setup, results='hide', warning=FALSE}
+library(dplyr) 
+library(tidyr)   
+library(ggplot2)
+library(lubridate)
+library(forecast)
+library(zoo)
+library(vctrs)
+library(fitdistrplus)
+library(actuar)
+```
+
+```{r import and cleaning dataset, results='hide'}
+df_path <- '/Volumes/HDD_Ale/DSLab/dati-giornalieri-comune/comune_giorno.csv'
+data_path_pop_tot <- "/Volumes/HDD_Ale/ds_lab/dataset/tot_pop.csv"
+# df_path <- 'C:\\Users\\stefa\\Desktop\\dsLab\\local\\dataset\\comune_giorno.csv'
+# data_path_pop_tot <- "C:\\Users\\stefa\\Desktop\\dsLab\\local\\dataset\\tot_pop.csv"
+df <-  read.csv(df_path)
+df_pop <- read.csv(data_path_pop_tot)
+# sistemo il dataset in forma più comoda
+df <- df %>%
+  gather(key = "SESSO_ANNO", value = "DECESSI", MASCHI_15:FEMMINE_20)
+df %>% separate(SESSO_ANNO, c("SESSO", "ANNO"), "_") -> df
+df %>% mutate(DATA = as.Date(paste0("0", GE, "20", ANNO), format = "%m%d%Y")) -> df
+df$GIORNO <- as.numeric(substr(as.character(df$GE), 2, 3))
+df$MESE <- as.numeric(substr(as.character(df$GE), 1, 1))
+df$GE <- NULL
+df$TOTALE_15 <- NULL
+df$TOTALE_16 <- NULL
+df$TOTALE_17 <- NULL
+df$TOTALE_18 <- NULL
+df$TOTALE_19 <- NULL
+df$TOTALE_20 <- NULL
+summary(df)
+```
+### Analisi Differenza nelle distribuzioni   
+L'analisi dei decessi è focalizzata sulla regione Lombardia.  
+La prima analisi effettuata per dimostrare che c'è stato un incremento significativo dei decessi nel 2020 rispetto agli anni precedenti è un'analisi della varianza tra i gruppi anno 15, 16, 17, 18, 19, 20.  
+I dati relativi ad Aprile sono stati inoltre eliminati in quanto non totalmente disponibili nell'anno 2020.  
+La colonna DECESSI riporta diversi valori pari a 9999. Questo dato è un valore dummy per indicare la mancanza del dato in fase di raccolta. Essendo che vogliamo dimostrare la differenza in media delle distribuzioni tra i gruppi consideriamo solamente i comuni che non presentano questa anomalia.  
+Il dataset così pulito è formato da 622 comuni Lombardi.  
+```{r anova1}
+df %>% filter(NOME_REGIONE == 'Lombardia',
+              DECESSI != 0,
+              MESE %in% c(1,2,3))%>% 
+  dplyr::select(NOME_COMUNE,ANNO,MESE,DECESSI,DATA) -> df_comuni
+
+#summary(df_comuni)
+
+df_comuni[df_comuni$DECESSI == 9999,] %>% dplyr::select(NOME_COMUNE) %>% distinct -> comuni_9999
+
+df_comuni_NO_9999 <- subset(df_comuni, !(df_comuni$NOME_COMUNE %in% comuni_9999$NOME_COMUNE)) 
+summary(df_comuni_NO_9999)
+
+#622 comuni senza 9999
+length(unique(df_comuni_NO_9999$NOME_COMUNE))
+
+```
+Aggregando per comune ed anno, sommando il numero di decessi scopriamo la presenza di forti outliers. Questo suggerisce di differenziare l'analisi in categorie differenti, in modo da evitare che le code pesino eccessivamente sulle distribuzioni.  
+
+```{r Anova2}
+#Tutti mesi (1,2,3)
+#61.5 = 30 + (30-9)*1.5
+df_aggr <- plyr::ddply(df_comuni_NO_9999, c("NOME_COMUNE","ANNO"), function(x) colSums(x[c("DECESSI")]))
+summary(df_aggr)
+
+```
+Per far ciò si considera quindi la classe dei comuni con bassa mortalità, utilizzando come punto di riferimento il massimo $Q_3 + 1.5\cdot(Q_3-Q_1) = 61.5$.  
+```{r pippo, results="hide"}
+df_aggr[df_aggr$DECESSI > 61,] %>% dplyr::select(NOME_COMUNE) %>% distinct -> comuni_alti
+df_aggr[!(df_aggr$NOME_COMUNE %in% comuni_alti$NOME_COMUNE),]$NOME_COMUNE -> comuni_bassi
+df_aggr_bassi <- subset(df_aggr, df_aggr$NOME_COMUNE %in% comuni_bassi)
+summary(df_aggr[!(df_aggr$NOME_COMUNE %in% comuni_bassi),])
+#188.4 = 98.75 + (98.75-39)*1.5
+df_aggr[!(df_aggr$NOME_COMUNE %in% comuni_bassi) & df_aggr$DECESSI > 188,] %>% dplyr::select(NOME_COMUNE) %>% distinct -> comuni_alti
+df_aggr[!(df_aggr$NOME_COMUNE %in% comuni_alti$NOME_COMUNE) & !(df_aggr$NOME_COMUNE %in% comuni_bassi),]$NOME_COMUNE -> comuni_medi
+df_aggr_medi <- subset(df_aggr, df_aggr$NOME_COMUNE %in% comuni_medi)
+df_aggr_alti <- subset(df_aggr, df_aggr$NOME_COMUNE %in% comuni_alti$NOME_COMUNE)
+```
+Essendo ancora elevata la presenza di outliers si procede con la classe dei comuni con media mortalità, utilizzando come punto di riferimento il massimo $Q_3 + 1.5(Q_3-Q_1) = 188.4$. I restanti comuni formeranno la classe ad alta mortalità. Infine i comuni di Milano, Bergamo e Brescia verranno considerati a parte in quanto il numero di decessi è molto più elevato della distribuzione dell'ultima classe costruita.  
+```{r plot Boxplot}
+par(mfrow=c(1,1))
+boxplot(DECESSI~ANNO,data=df_aggr_bassi, outline = TRUE, main="# Decessi nei Comuni Lombardi con Basso numero di morti",
+        xlab="Anni", ylab="# Decessi", col="lightblue")
+boxplot(DECESSI~ANNO,data=df_aggr_medi, outline = TRUE, main="# Decessi nei Comuni Lombardi con Medio numero di Morti",
+        xlab="Anni", ylab="# Decessi", col="lightblue")
+boxplot(DECESSI~ANNO,data=df_aggr_alti[!(df_aggr_alti$NOME_COMUNE %in% c("Milano","Bergamo","Brescia")),], outline = TRUE, main="# Decessi nei Comuni Lombardi con Alto numero di Morti",
+        xlab="Anni", ylab="# Decessi", col="lightblue")
+boxplot(DECESSI~ANNO,data=df_aggr_alti[df_aggr_alti$NOME_COMUNE %in% c("Milano","Bergamo","Brescia"),], outline = TRUE, main="# Decessi nel Comune di Milano, Bergamo e Brescia",
+        xlab="Anni", ylab="# Decessi", col="lightblue")
+```
+Dall'analisi grafica sui boxplot possiamo notare la presenza di un'incremento nell'anno 2020. Per approfondire le cause dell'aumento del numero di decessi si osservano i dati mensili separatamente, applicando la logica delle classi di mortalità.  
+```{r Gennaio, echo=FALSE}
+#Gennaio
+df_aggr <- plyr::ddply(df_comuni_NO_9999[df_comuni_NO_9999$MESE == 1,], c("NOME_COMUNE","ANNO"), function(x) colSums(x[c("DECESSI")]))
+#summary(df_aggr)
+#20.5 = 10 + (10-3)*1.5
+df_aggr[df_aggr$DECESSI > 20,] %>% dplyr::select(NOME_COMUNE) %>% distinct -> comuni_alti
+df_aggr[!(df_aggr$NOME_COMUNE %in% comuni_alti$NOME_COMUNE),]$NOME_COMUNE -> comuni_bassi
+df_aggr_bassi <- subset(df_aggr, df_aggr$NOME_COMUNE %in% comuni_bassi)
+#summary(df_aggr[!(df_aggr$NOME_COMUNE %in% comuni_bassi),])
+#70.5 = 39 + (39-18)*1.5
+df_aggr[!(df_aggr$NOME_COMUNE %in% comuni_bassi) & df_aggr$DECESSI > 70,] %>% dplyr::select(NOME_COMUNE) %>% distinct -> comuni_alti
+df_aggr[!(df_aggr$NOME_COMUNE %in% comuni_alti$NOME_COMUNE) & !(df_aggr$NOME_COMUNE %in% comuni_bassi),]$NOME_COMUNE -> comuni_medi
+df_aggr_medi <- subset(df_aggr, df_aggr$NOME_COMUNE %in% comuni_medi)
+df_aggr_alti <- subset(df_aggr, df_aggr$NOME_COMUNE %in% comuni_alti$NOME_COMUNE)
+par(mfrow=c(2,2))
+boxplot(DECESSI~ANNO,data=df_aggr_bassi, outline = TRUE, main="Bassa Mortalità - Gennaio",
+        xlab="Anni", ylab="# Decessi", col="lightblue")
+boxplot(DECESSI~ANNO,data=df_aggr_medi, outline = TRUE, main="Media Mortalità - Gennaio",
+        xlab="Anni", ylab="# Decessi", col="lightblue")
+boxplot(DECESSI~ANNO,data=df_aggr_alti[df_aggr_alti$NOME_COMUNE != "Milano",], outline = TRUE, main="Alta Mortalità - Gennaio",
+        xlab="Anni", ylab="# Decessi", col="lightblue")
+boxplot(DECESSI~ANNO,data=df_aggr_alti[df_aggr_alti$NOME_COMUNE == "Milano",], outline = TRUE, main="Milano - Gennaio",
+        xlab="Anni", ylab="# Decessi", col="lightblue")
+```
+Possiamo notare che graficamente non risultano differenze tra le distribuzioni. In particolare risulta un incremento, di cui andrebbe indagata la significatività nel 2017.  
+```{r Febbraio, echo=FALSE}
+#Febbraio
+df_aggr <- plyr::ddply(df_comuni_NO_9999[df_comuni_NO_9999$MESE == 2,], c("NOME_COMUNE","ANNO"), function(x) colSums(x[c("DECESSI")]))
+#summary(df_aggr)
+#18 = 9 + (9-3)*1.5
+df_aggr[df_aggr$DECESSI > 18,] %>% dplyr::select(NOME_COMUNE) %>% distinct -> comuni_alti
+df_aggr[!(df_aggr$NOME_COMUNE %in% comuni_alti$NOME_COMUNE),]$NOME_COMUNE -> comuni_bassi
+df_aggr_bassi <- subset(df_aggr, df_aggr$NOME_COMUNE %in% comuni_bassi)
+#summary(df_aggr[!(df_aggr$NOME_COMUNE %in% comuni_bassi),])
+#60 = 33 + (33-15)*1.5
+df_aggr[!(df_aggr$NOME_COMUNE %in% comuni_bassi) & df_aggr$DECESSI > 60,] %>% dplyr::select(NOME_COMUNE) %>% distinct -> comuni_alti
+df_aggr[!(df_aggr$NOME_COMUNE %in% comuni_alti$NOME_COMUNE) & !(df_aggr$NOME_COMUNE %in% comuni_bassi),]$NOME_COMUNE -> comuni_medi
+df_aggr_medi <- subset(df_aggr, df_aggr$NOME_COMUNE %in% comuni_medi)
+df_aggr_alti <- subset(df_aggr, df_aggr$NOME_COMUNE %in% comuni_alti$NOME_COMUNE)
+par(mfrow=c(2,2))
+boxplot(DECESSI~ANNO,data=df_aggr_bassi, outline = TRUE, main="Bassa Mortalità - Febbraio",
+        xlab="Anni", ylab="# Decessi", col="lightblue")
+boxplot(DECESSI~ANNO,data=df_aggr_medi, outline = TRUE, main="Media Mortalità - Febbraio",
+        xlab="Anni", ylab="# Decessi", col="lightblue")
+boxplot(DECESSI~ANNO,data=df_aggr_alti[df_aggr_alti$NOME_COMUNE != "Milano",], outline = TRUE, main="Alta Mortalità - Febbraio",
+        xlab="Anni", ylab="# Decessi", col="lightblue")
+boxplot(DECESSI~ANNO,data=df_aggr_alti[df_aggr_alti$NOME_COMUNE == "Milano",], outline = TRUE, main="Milano - Febbraio",
+        xlab="Anni", ylab="# Decessi", col="lightblue")
+```
+Anche per Febbraio non vediamo particolari differenze tra il 2020 e gli altri anni. Ci aspettiamo dunque che tutta la differenza notata nelle distribuzioni totali sia apportata dal mese di Marzo.  
+```{r Marzo, echo=FALSE}
+#Marzo
+df_aggr <- plyr::ddply(df_comuni_NO_9999[df_comuni_NO_9999$MESE == 3,], c("NOME_COMUNE","ANNO"), function(x) colSums(x[c("DECESSI")]))
+#summary(df_aggr)
+#25,5 = 12 + (12-3)*1.5
+df_aggr[df_aggr$DECESSI > 25,] %>% dplyr::select(NOME_COMUNE) %>% distinct -> comuni_alti
+df_aggr[!(df_aggr$NOME_COMUNE %in% comuni_alti$NOME_COMUNE),]$NOME_COMUNE -> comuni_bassi
+df_aggr_bassi <- subset(df_aggr, df_aggr$NOME_COMUNE %in% comuni_bassi)
+#summary(df_aggr[!(df_aggr$NOME_COMUNE %in% comuni_bassi),])
+#69,5 = 32 + (32-7)*1.5
+df_aggr[!(df_aggr$NOME_COMUNE %in% comuni_bassi) & df_aggr$DECESSI > 69,] %>% dplyr::select(NOME_COMUNE) %>% distinct -> comuni_alti
+df_aggr[!(df_aggr$NOME_COMUNE %in% comuni_alti$NOME_COMUNE) & !(df_aggr$NOME_COMUNE %in% comuni_bassi),]$NOME_COMUNE -> comuni_medi
+df_aggr_medi <- subset(df_aggr, df_aggr$NOME_COMUNE %in% comuni_medi)
+df_aggr_alti <- subset(df_aggr, df_aggr$NOME_COMUNE %in% comuni_alti$NOME_COMUNE)
+par(mfrow=c(2,2))
+boxplot(DECESSI~ANNO,data=df_aggr_bassi, outline = TRUE, main="Bassa Mortalità - Marzo",
+        xlab="Anni", ylab="# Decessi", col="lightblue")
+boxplot(DECESSI~ANNO,data=df_aggr_medi, outline = TRUE, main="Media Mortalità - Marzo",
+        xlab="Anni", ylab="# Decessi", col="lightblue")
+boxplot(DECESSI~ANNO,data=df_aggr_alti[!(df_aggr_alti$NOME_COMUNE %in% c("Milano","Bergamo","Brescia")),], outline = TRUE, main="Alta Mortalità - Marzo",
+        xlab="Anni", ylab="# Decessi", col="lightblue")
+boxplot(DECESSI~ANNO,data=df_aggr_alti[df_aggr_alti$NOME_COMUNE %in% c("Milano","Bergamo","Brescia"),], outline = TRUE, main="Milano, Bergamo e Brescia - Marzo",
+        xlab="Anni", ylab="# Decessi", col="lightblue")
+```
+Come intuito precedentemente il mese di Marzo è quello che più influisce sulla differenza tra gli anni nel numero di decessi. Quindi l'analisi si focalizzerà sui dati relativi a Marzo.  
+Ricordando le ipotesi per il test dell'ANOVA:    
+ 
+1. I soggetti sono tra loro indipendenti
+2. Normalità della distribuzione
+3. Omoschedasticità
+
+
+La 1 è dimostrata per definizione in quanto i soggetti deceduti non verranno ri-analizzati.  
+L'ipotesi 2 è violata. Già dall'istogramma si nota che le distribuzioni sono non normali.    
+
+Per identificare la distribuzione del numero di decessi nei comuni lombardi è stata eseguita una statistica Goodness of Fit con stima della massima verosomiglianza dei parametri. Sono state considerate le distribuzioni teoriche seguenti:    
+
+
+1. Weibull
+2. Log Normale
+3. Gamma
+4. Log Logistic
+5. Pareto
+
+```{r stat}
+gos_stat <- function(x, anno){
+  fw <- fitdist(x, "weibull")
+  fln <- fitdist(x, "lnorm")
+  fg <- fitdist(x, "gamma")
+  fll <- fitdist(x, "llogis",start = list(shape = 1, scale = 500))
+  fp <- fitdist(x, "pareto",start = list(shape = 1, scale = 500))
+  #fb <- fitdist(x, "burr",start = list(shape1 = 0.3, shape2 = 1, rate = 1))
+  denscomp(list(fw, fln, fg, fll, fp), main = paste0("Histogram and theoretical densities, year 20",anno, sep=""))
+  print(fln)
+  return(gofstat(list(fw, fln, fg, fll, fp), fitnames = c("Weibull", "Lognormal", "Gamma", "Loglogistic", "Pareto")))
+}
+```
+
+```{r distribuzioni, warning=FALSE, results="hide", echo=FALSE}
+
+#hp:
+#   1) soggetti sono tra loro indipendenti. 
+#   2) normalità della distribuzione (shapiro.test(x) #pvalue > 0.05)
+#   3) omoschedasticità (bartlett.test(dati, gruppi #pvalue>0.5)
+
+
+
+#df_aggr_bassi
+#   1) Rispettata perchè la persona deceduta non viene più considerata
+#   2) Le distribuzioni sono chiaramente NON normali.
+
+
+par(mfrow = c(3, 2))
+for(i in 15:20) {
+  x <- df_aggr_bassi[df_aggr_bassi$ANNO == i,]
+  print(paste0("Bassi - Anno 20",i, sep=""))
+  print(gos_stat(x$DECESSI,i))
+}  
+
+par(mfrow = c(3, 2))
+for(i in 15:20) {
+  x <- df_aggr_medi[df_aggr_medi$ANNO == i,]
+  print(paste0("Medi - Anno 20",i, sep=""))
+  print(gos_stat(x$DECESSI,i))
+}  
+
+par(mfrow = c(3, 2))
+for(i in 15:20) {
+  x <- df_aggr_alti[df_aggr_alti$ANNO == i & !(df_aggr_alti$NOME_COMUNE %in% c("Milano","Bergamo","Brescia")),]
+  print(paste0("Alti - Anno 20",i, sep=""))
+  print(gos_stat(x$DECESSI,i))
+}  
+```
+
+
+
+
+A titolo esemplificativo prendiamo i comuni con mortalità media e notiamo che la distribuzione Log Normale è quella che mediamente minimizza le statistiche KS, CVM e AD. In particolare, quest'ultima è la più sensibile alle code della distribuzione e la Log Normale risulta quella più stabile anche per questa statistica. 
+Infine notiamo che i coefficienti sitmati sono  
+
+    
+1. Media nel $2020$ è $1.5$ volte quella negli altri anni
+2. Deviazione Standard nel 2020 uguale a quella negli altri anni
+
+
+
+
+```{r, warning=FALSE}
+par(mfrow = c(3, 2))
+for(i in 15:20) {
+  x <- df_aggr_medi[df_aggr_medi$ANNO == i,]
+  print(paste0("Medi - Anno 20",i, sep=""))
+  print(gos_stat(x$DECESSI,i))
+}  
+```
+
+Violata quindi la seconda ipotesi per l'analisi della varianza passiamo a verificare la terza, quella di omeoschedasticità. Notiamo però che il p-value del test di Bartlett è sempre $< 0.05$. Rifiutiamo quindi l'ipotesi nulla di omeoschedasticità.  
+
+
+```{r}
+bartlett.test(df_aggr_bassi$DECESSI, df_aggr_bassi$ANNO)
+bartlett.test(df_aggr_medi$DECESSI, df_aggr_medi$ANNO)
+bartlett.test(df_aggr_alti$DECESSI, df_aggr_alti$ANNO)
+```
+
+Essendo le due ipotesi per l'ANOVA violate si può procedere con il test non parametrico di Friedman, e con il post-hoc test di Wilcoxon.  
+Il test ci mostra che c'è almeno una distribuzione differente dalle altre per ogni classe di mortalità, p-value motlo inferiore anche a $0.01$.  
+
+```{r, results='hide'}
+
+## ANOVA per distribuzioni non normali ed eteroschedastiche, con varianze non omogenee,
+## Procediamo con il test di Friedman, e con il post-hoc test di Wilcoxon
+# https://www.r-statistics.com/2010/02/post-hoc-analysis-for-friedmans-test-r-code/
+
+
+df_aggr_bassi <- df_aggr_bassi %>% rstatix::convert_as_factor(ANNO)
+
+df_aggr_bassi %>% count(NOME_COMUNE) %>% filter(n < 6) %>% dplyr::select(NOME_COMUNE) -> comuni_del
+
+df_aggr_bassi_Friedman <- df_aggr_bassi[!(df_aggr_bassi$NOME_COMUNE %in% comuni_del$NOME_COMUNE),]
+
+df_aggr_bassi_15 <- df_aggr_bassi_Friedman[df_aggr_bassi_Friedman$ANNO == 15,]$DECESSI
+df_aggr_bassi_16 <- df_aggr_bassi_Friedman[df_aggr_bassi_Friedman$ANNO == 16,]$DECESSI
+df_aggr_bassi_17 <- df_aggr_bassi_Friedman[df_aggr_bassi_Friedman$ANNO == 17,]$DECESSI
+df_aggr_bassi_18 <- df_aggr_bassi_Friedman[df_aggr_bassi_Friedman$ANNO == 18,]$DECESSI
+df_aggr_bassi_19 <- df_aggr_bassi_Friedman[df_aggr_bassi_Friedman$ANNO == 19,]$DECESSI
+df_aggr_bassi_20 <- df_aggr_bassi_Friedman[df_aggr_bassi_Friedman$ANNO == 20,]$DECESSI
+
+
+df_aggr_bassi_matrix <- cbind(df_aggr_bassi_15, df_aggr_bassi_16, df_aggr_bassi_17,df_aggr_bassi_18,df_aggr_bassi_19,df_aggr_bassi_20)
+
+#Medi
+df_aggr_medi <- df_aggr_medi %>% rstatix::convert_as_factor(ANNO)
+
+df_aggr_medi %>% count(NOME_COMUNE) %>% filter(n < 6) %>% dplyr::select(NOME_COMUNE) -> comuni_del
+
+df_aggr_medi_Friedman <- df_aggr_medi[!(df_aggr_medi$NOME_COMUNE %in% comuni_del$NOME_COMUNE),]
+
+df_aggr_medi_15 <- df_aggr_medi_Friedman[df_aggr_medi_Friedman$ANNO == 15,]$DECESSI
+df_aggr_medi_16 <- df_aggr_medi_Friedman[df_aggr_medi_Friedman$ANNO == 16,]$DECESSI
+df_aggr_medi_17 <- df_aggr_medi_Friedman[df_aggr_medi_Friedman$ANNO == 17,]$DECESSI
+df_aggr_medi_18 <- df_aggr_medi_Friedman[df_aggr_medi_Friedman$ANNO == 18,]$DECESSI
+df_aggr_medi_19 <- df_aggr_medi_Friedman[df_aggr_medi_Friedman$ANNO == 19,]$DECESSI
+df_aggr_medi_20 <- df_aggr_medi_Friedman[df_aggr_medi_Friedman$ANNO == 20,]$DECESSI
+
+
+df_aggr_medi_matrix <- cbind(df_aggr_medi_15, df_aggr_medi_16, df_aggr_medi_17,df_aggr_medi_18,df_aggr_medi_19,df_aggr_medi_20)
+
+#Alti
+df_aggr_alti <- df_aggr_alti %>% rstatix::convert_as_factor(ANNO)
+
+df_aggr_alti %>% count(NOME_COMUNE) %>% filter(n < 6) %>% dplyr::select(NOME_COMUNE) -> comuni_del
+
+df_aggr_alti_Friedman <- df_aggr_alti[!(df_aggr_alti$NOME_COMUNE %in% comuni_del$NOME_COMUNE),]
+
+df_aggr_alti_15 <- df_aggr_alti_Friedman[df_aggr_alti_Friedman$ANNO == 15,]$DECESSI
+df_aggr_alti_16 <- df_aggr_alti_Friedman[df_aggr_alti_Friedman$ANNO == 16,]$DECESSI
+df_aggr_alti_17 <- df_aggr_alti_Friedman[df_aggr_alti_Friedman$ANNO == 17,]$DECESSI
+df_aggr_alti_18 <- df_aggr_alti_Friedman[df_aggr_alti_Friedman$ANNO == 18,]$DECESSI
+df_aggr_alti_19 <- df_aggr_alti_Friedman[df_aggr_alti_Friedman$ANNO == 19,]$DECESSI
+df_aggr_alti_20 <- df_aggr_alti_Friedman[df_aggr_alti_Friedman$ANNO == 20,]$DECESSI
+
+block <- 1:length(df_aggr_alti_20)
+
+df_aggr_alti_matrix <- cbind(df_aggr_alti_15, df_aggr_alti_16, df_aggr_alti_17,df_aggr_alti_18,df_aggr_alti_19,df_aggr_alti_20,block)
+
+```
+
+```{r}
+#<0.05 differenza significativa tra almeno uno dei gruppi
+friedman.test(df_aggr_bassi_matrix)
+friedman.test(df_aggr_medi_matrix)
+friedman.test(df_aggr_alti_matrix)
+```
+
+Analizzando con il test post-hoc di Wilcox la differenza tra le distribuzioni a due a due notiamo che il $2020$ è statisticamente differente da ogni altro anno.  
+Abbiamo dei valori significativi anche per altre distribuzioni, come per esempio nei comuni ad alta mortalità il $2017$ è significativamente differente da tutti gli altri anni, come avevamo già notato precedentemente dall'analisi grafica.  
+
+```{r}
+#<0.05 differenza significativa
+
+pairwise.wilcox.test(df_aggr_bassi_Friedman$DECESSI,df_aggr_bassi_Friedman$ANNO, paired = TRUE, exact=FALSE, p.adj="none", correct=FALSE)
+pairwise.wilcox.test(df_aggr_medi_Friedman$DECESSI,df_aggr_medi_Friedman$ANNO, paired = TRUE, exact=FALSE, p.adj="none", correct=FALSE)
+pairwise.wilcox.test(df_aggr_alti_Friedman$DECESSI,df_aggr_alti_Friedman$ANNO, paired = TRUE, exact=FALSE, p.adj="none", correct=FALSE)
+
+```
+Possiamo quindi concludere questa parte di analisi confermando che i comuni Lombardi, nel mese di Marzo $2020$, hanno avuto un incremento significativo nel numero dei decessi.  
+
+### Valutazione dell'incremento
+Riprendiamo il dataset completo con i DECESSI $= 9999$.  
+
+```{r work1, results='hide'}
+# Prendo la Lombardia
+df %>% filter(NOME_REGIONE == 'Lombardia')%>% 
+  dplyr::select(NOME_PROVINCIA,NOME_COMUNE,DECESSI,CL_ETA,ANNO,MESE,GIORNO,DATA_INIZIO_DIFF, DATA, SESSO) -> df
+#table(df$NOME_COMUNE) # alcuni comuni sono venuti con i nomi sbagliati li sistemo
+```
+La funzione read csv genera dei caratteri anomali per le lettere accentate, perciò facciamo una correzzione manuale.  
+
+```{r fix accenti}
+df$NOME_COMUNE <- as.character(df$NOME_COMUNE)
+df %>%
+  mutate(NOME_COMUNE=replace(NOME_COMUNE, NOME_COMUNE=="Alm\xe8", "Almè")) %>%
+  as.data.frame() -> df
+# 2
+df %>%
+  mutate(NOME_COMUNE=replace(NOME_COMUNE, NOME_COMUNE=="Barzan\xf2", "Barzanò"))%>%
+  as.data.frame() -> df
+# 3
+df %>%
+  mutate(NOME_COMUNE=replace(NOME_COMUNE, NOME_COMUNE=="Bascap\xe8", "Bascapè"))%>%
+  as.data.frame() -> df
+# 7
+df %>%
+  mutate(NOME_COMUNE=replace(NOME_COMUNE, NOME_COMUNE=="Cant\xf9", "Cantù"))%>%
+  as.data.frame() -> df
+# 11
+df %>%
+  mutate(NOME_COMUNE=replace(NOME_COMUNE, NOME_COMUNE=="Fenegr\xf2", "Fenegrò"))%>%
+  as.data.frame() -> df
+df %>%
+  mutate(NOME_COMUNE=replace(NOME_COMUNE, NOME_COMUNE=="Gambol\xf2", "Gambolò"))%>%
+  as.data.frame() -> df
+#
+# 14
+df %>%
+  mutate(NOME_COMUNE=replace(NOME_COMUNE, NOME_COMUNE=="Mont\xf9 Beccaria", "Montù Beccaria"))%>%
+  as.data.frame() -> df
+# 15
+df %>%
+  mutate(NOME_COMUNE=replace(NOME_COMUNE, NOME_COMUNE=="Muggi\xf2", "Muggiò"))%>%
+  as.data.frame() -> df
+# 18
+df %>%
+  mutate(NOME_COMUNE=replace(NOME_COMUNE, NOME_COMUNE=="Ro\xe8 Volciano", "Roè Volciano"))%>%
+  as.data.frame() -> df
+# 19
+df %>%
+  mutate(NOME_COMUNE=replace(NOME_COMUNE, NOME_COMUNE=="Sal\xf2", "Salò"))%>%
+  as.data.frame() -> df
+df %>%
+  mutate(NOME_COMUNE=replace(NOME_COMUNE, NOME_COMUNE=="Santa Maria Ho\xe8", "Santa Maria Hoè"))%>%
+  as.data.frame() -> df
+# 23
+df %>%
+  mutate(NOME_COMUNE=replace(NOME_COMUNE, NOME_COMUNE=="Tem\xf9", "Temù"))%>%
+  as.data.frame() -> df
+# 25
+df %>%
+  mutate(NOME_COMUNE=replace(NOME_COMUNE, NOME_COMUNE=="Travac\xf2 Siccomario", "Travacò Siccomario"))%>%
+  as.data.frame() -> df
+# 28
+df %>%
+  mutate(NOME_COMUNE=replace(NOME_COMUNE, NOME_COMUNE=="Vigan\xf2", "Viganò"))%>%
+  as.data.frame() -> df
+# 29
+df %>%
+  mutate(NOME_COMUNE=replace(NOME_COMUNE, NOME_COMUNE=="Viggi\xf9", "Viggiù"))%>%
+  as.data.frame() -> df
+# 30
+df %>%
+  mutate(NOME_COMUNE=replace(NOME_COMUNE, NOME_COMUNE=="Villa d'Alm\xe8", "Villa d'Almè"))%>%
+  as.data.frame() -> df
+# 31
+df %>%
+  mutate(NOME_COMUNE=replace(NOME_COMUNE, NOME_COMUNE=="Zerbol\xf2", "Zerbolò"))%>%
+  as.data.frame() -> df
+```
+
+Decidiamo di integrare i dati con le popolazioni dei Comuni al 2019. Alcuni comuni non presentano il valore della popolazione, quindi viene aggiunto manualmente. Inoltre vengono eliminati i dati aggregati delle provincie.  
+```{r preparo pop per join, include=FALSE}
+df_pop <- df_pop[-c(1,3:12,14,15)]
+names(df_pop)[2] <- "POPOLAZIONE"
+names(df_pop)[1] <- "NOME_COMUNE"
+```
+
+```{r join popolazione, results='hide', warning=FALSE}
+df %>% left_join(df_pop, by='NOME_COMUNE') -> df
+summary(df)
+# controllo NA in popolazione
+y<-dplyr::filter(df,is.na(POPOLAZIONE))
+table(y$NOME_COMUNE)
+```
+
+```{r sistemo NA popolazione}
+df %>%
+  mutate(POPOLAZIONE=replace(POPOLAZIONE, NOME_COMUNE=="Borgo Mantovano", 5529))%>%
+  as.data.frame() -> df
+df %>%
+  mutate(POPOLAZIONE=replace(POPOLAZIONE, NOME_COMUNE=="Borgocarbonara", 1931))%>%
+  as.data.frame() -> df
+df %>%
+  mutate(POPOLAZIONE=replace(POPOLAZIONE, NOME_COMUNE=="Cadrezzate con Osmate", 2659))%>%
+  as.data.frame() -> df
+df %>%
+  mutate(POPOLAZIONE=replace(POPOLAZIONE, NOME_COMUNE=="Castelgerundo", 1498))%>%
+  as.data.frame() -> df
+df %>%
+  mutate(POPOLAZIONE=replace(POPOLAZIONE, NOME_COMUNE=="Centro Valle Intelvi", 3227))%>%
+  as.data.frame() -> df
+df %>%
+  mutate(POPOLAZIONE=replace(POPOLAZIONE, NOME_COMUNE=="Colli Verdi", 1074))%>%
+  as.data.frame() -> df
+df %>%
+  mutate(POPOLAZIONE=replace(POPOLAZIONE, NOME_COMUNE=="Gornate Olona", 2223))%>%
+  as.data.frame() -> df
+df %>%
+  mutate(POPOLAZIONE=replace(POPOLAZIONE, NOME_COMUNE=="Piadena Drizzona", 563))%>%
+  as.data.frame() -> df
+df %>%
+  mutate(POPOLAZIONE=replace(POPOLAZIONE, NOME_COMUNE=="Puegnago del Garda", 3439))%>%
+  as.data.frame() -> df
+df %>%
+  mutate(POPOLAZIONE=replace(POPOLAZIONE, NOME_COMUNE=="San Giorgio Bigarello", 13654))%>%
+  as.data.frame() -> df
+df %>%
+  mutate(POPOLAZIONE=replace(POPOLAZIONE, NOME_COMUNE=="Solbiate con Cagno", 4653))%>%
+  as.data.frame() -> df
+df %>%
+  mutate(POPOLAZIONE=replace(POPOLAZIONE, NOME_COMUNE=="Torre de' Busi", 2130))%>%
+  as.data.frame() -> df
+df %>%
+  mutate(POPOLAZIONE=replace(POPOLAZIONE, NOME_COMUNE=="Valvarrone", 551))%>%
+  as.data.frame() -> df
+df %>%
+  mutate(POPOLAZIONE=replace(POPOLAZIONE, NOME_COMUNE=="Vermezzo con Zelo", 5805))%>%
+  as.data.frame() -> df
+```
+
+```{r fix popolazione}
+# Brescia
+df %>% filter(POPOLAZIONE!=1265954) ->df
+# milano
+df %>% filter(POPOLAZIONE!=3250315) -> df
+# bergamo
+df %>% filter(POPOLAZIONE!=1114590) -> df
+# como
+df %>% filter(POPOLAZIONE!=599204) -> df
+# cremona
+df %>% filter(POPOLAZIONE!=358955) -> df
+# lecco
+df %>% filter(POPOLAZIONE!=337380) -> df
+#lodi
+df %>% filter(POPOLAZIONE!=230198) -> df
+# mantova
+df %>% filter(POPOLAZIONE!=412292) -> df
+#Pavia
+df %>% filter(POPOLAZIONE!=545888) -> df
+# sondrio
+df %>% filter(POPOLAZIONE!=181095) -> df
+# varese
+df %>% filter(POPOLAZIONE!=890768) -> df
+
+```
+
+Eliminiamo per comodità di visualizzazione della serie storica i $501$ decessi relativi al $29$ Febbraio.
+```{r sistemo i 29 }
+y<-dplyr::filter(df,is.na(DATA))
+df %>% anti_join(y, by="DATA") -> df
+
+df %>% filter(MESE==2,
+              GIORNO==29,
+              DECESSI!=9999) %>% 
+      summarise(DECESSI=sum(DECESSI))
+
+df <- subset(df, !(GIORNO==29 & MESE==2))
+df <- subset(df , MESE!=4)
+```
+
+```{r sistemo dataset analisi}
+# metto a NA i valori 9999
+df[df == 9999] <- NA
+df %>% filter(POPOLAZIONE>=60000) -> df_60000 
+y<-dplyr::filter(df_60000,is.na(DECESSI))
+table(y$NOME_COMUNE)
+# DEVO TOGLIERE VIGEVANO POICHÈ HO 1116 OSSERVAZIONI A NA
+df_60000 %>% filter(NOME_COMUNE!='Vigevano') -> df_60000 
+table(df_60000$NOME_COMUNE)
+```
+Abbiamno deciso di mostrare le serie storiche di Comuni con più di 60.000 abitanti poichè abbiamo visto che a meno di Vigevano sono tutti consistenti i dati. I comuni risultanti sono:    
+  
+1. Bergamo
+2. Brescia
+3. Busto Arsizio
+4. Cinisello Balsamo
+5. Como
+6. Cremona
+7. Legnano
+8. Milano
+9. Monza
+10. Pavia
+11. Sesto San Giovanni
+12. Varese
+
+Inizialmente prendiamo il dato assoluto dei decessi per cui sostanzialmente andiamo a fare un ranking delle morti con un incremento percentuale maggiore.
+```{r preparo dataset ts1}
+listacomuni <- c("Bergamo", "Brescia", "Busto Arsizio", "Cinisello Balsamo", "Como", "Cremona", "Legnano", "Milano", "Monza", "Pavia", "Sesto San Giovanni", "Varese")
+datasets <- list()
+for(i in listacomuni){
+  df_60000 %>% filter(NOME_COMUNE==i) %>%
+    mutate(DECESSI=replace(DECESSI, DECESSI==9999, NA)) -> x
+  
+  x %>% group_by(DATA) %>%
+    summarise(DECESSI = sum(DECESSI))  %>%
+    as_tibble() -> x
+  assign(paste0('df_comune_',i), x)
+  datasets <- append(datasets,paste0('df_comune_',i))
+}
+```
+
+```{r Bergamots1, echo=FALSE}
+# Milano
+ts_Bergamo <- zoo(df_comune_Bergamo$DECESSI, df_comune_Bergamo$DATA)
+ts_Bergamo <- ts(ts_Bergamo, frequency = 90)
+autoplot(ts_Bergamo, main = paste0('Decessi Bergamo 2015-2020'), xlab = 'Anni a 90 giorni', ylab = 'Decessi')
+```
+
+Il codice per il plot si ripete.  
+```{r Bresciats1, echo=FALSE}
+ts_Brescia <- zoo(df_comune_Brescia$DECESSI, df_comune_Brescia$DATA)
+ts_Brescia <- ts(ts_Brescia, frequency = 90)
+autoplot(ts_Brescia, main = paste0('Decessi Brescia 2015-2020'), xlab = 'Anni a 90 giorni', ylab = 'Decessi')
+```
+
+```{r Busto Arsiziots1, echo=FALSE}
+ts_Bs <- zoo(`df_comune_Busto Arsizio`$DECESSI, `df_comune_Busto Arsizio`$DATA)
+ts_Bs <- ts(ts_Bs, frequency = 90)
+autoplot(ts_Bs, main = paste0('Decessi Busto Arsizio 2015-2020'), xlab = 'Anni a 90 giorni', ylab = 'Decessi')
+```
+
+```{r Cinisello Balsamots1, echo=FALSE}
+ts_Cb <- zoo(`df_comune_Cinisello Balsamo`$DECESSI, `df_comune_Cinisello Balsamo`$DATA)
+ts_Cb <- ts(ts_Cb, frequency = 90)
+autoplot(ts_Cb, main = paste0('Decessi Cinisello 2015-2020'), xlab = 'Anni a 90 giorni', ylab = 'Decessi')
+```
+
+```{r Comots1, echo=FALSE}
+ts_Como <- zoo(df_comune_Como$DECESSI, df_comune_Como$DATA)
+ts_Como <- ts(ts_Como, frequency = 90)
+autoplot(ts_Como, main = paste0('Decessi Como 2015-2020'), xlab = 'Anni a 90 giorni', ylab = 'Decessi')
+```
+
+```{r Cremonats1, echo=FALSE}
+ts_Cremona <- zoo(df_comune_Cremona$DECESSI, df_comune_Cremona$DATA)
+ts_Cremona <- ts(ts_Cremona, frequency = 90)
+autoplot(ts_Cremona, main = paste0('Decessi Cremona 2015-2020'), xlab = 'Anni a 90 giorni', ylab = 'Decessi')
+```
+
+```{r Legnanots1, echo=FALSE}
+ts_Legnano <- zoo(df_comune_Legnano$DECESSI, df_comune_Legnano$DATA)
+ts_Legnano <- ts(ts_Legnano, frequency = 90)
+autoplot(ts_Legnano, main = paste0('Decessi Legnano 2015-2020'), xlab = 'Anni a 90 giorni', ylab = 'Decessi')
+```
+
+```{r Milanots1, echo=FALSE}
+# Milano
+ts_milano <- zoo(df_comune_Milano$DECESSI, df_comune_Milano$DATA)
+ts_milano <- ts(ts_milano, frequency = 90)
+autoplot(ts_milano, main = paste0('Decessi Milano 2015-2020'), xlab = 'Anni a 90 giorni', ylab = 'Decessi')
+```
+
+```{r Monzats1, echo=FALSE}
+ts_Monza <- zoo(df_comune_Monza$DECESSI, df_comune_Monza$DATA)
+ts_Monza <- ts(ts_Monza, frequency = 90)
+autoplot(ts_Monza, main = paste0('Decessi Monza 2015-2020'), xlab = 'Anni a 90 giorni', ylab = 'Decessi')
+```
+
+```{r Paviats1, echo=FALSE}
+ts_Pavia <- zoo(df_comune_Pavia$DECESSI, df_comune_Pavia$DATA)
+ts_Pavia <- ts(ts_Pavia, frequency = 90)
+autoplot(ts_Pavia, main = paste0('Decessi Pavia 2015-2020'), xlab = 'Anni a 90 giorni', ylab = 'Decessi')
+```
+
+```{r sestosgiovannits1, echo=FALSE}
+ts_ssg<- zoo(`df_comune_Sesto San Giovanni`$DECESSI, `df_comune_Sesto San Giovanni`$DATA)
+ts_ssg <- ts(ts_ssg, frequency = 90)
+autoplot(ts_ssg, main = paste0('Decessi Sesto San Giovanni 2015-2020'), xlab = 'Anni a 90 giorni', ylab = 'Decessi')
+```
+
+```{r varesets1, echo=FALSE}
+ts_Varese<- zoo(df_comune_Varese$DECESSI, df_comune_Varese$DATA)
+ts_Varese <- ts(ts_Varese, frequency = 90)
+autoplot(ts_Varese, main = paste0('Decessi Sesto San Giovanni 2015-2020'), xlab = 'Anni a 90 giorni', ylab = 'Decessi')
+```
+
+```{r tutte assieme1}
+ts_total <- ts.union(ts_Bergamo, ts_Brescia, ts_Bs, ts_Cb, ts_Como, ts_Cremona, ts_Legnano, ts_milano, ts_Monza, ts_Pavia, ts_ssg, ts_Varese)
+colnames(ts_total)
+colnames(ts_total)[1:12] <- listacomuni
+autoplot(ts_total, main = paste0('Decessi Milano'), xlab = 'Marzo', ylab = 'Decessi')
+```
+
+Come possiamo notare Milano in termini assoluti ha avuto l'incremento maggiore per cui nel mese di Marzo ha avuto un  rapido incremento fino ad arrivare per vari giorni a 80 decessi al giorno. Da notare anche Bergamo con la media di 30 decessi al giorno nel mese di Marzo.  
+
+Decidiamo quindi di creare una variabile che chiameremo "Decessi pro capite" per cui andiamo a stimare le morti giornaliere rispetto alla popolazione (stima del 2019) andando a vedere non più i termini assoluti. Vogliamo vedere se le zone più colpite rimangono le stesse.  
+
+```{r preparo dataset ts2, warning=FALSE}
+listacomuni <- c("Bergamo", "Brescia", "Busto Arsizio", "Cinisello Balsamo", "Como", "Cremona", "Legnano", "Milano", "Monza", "Pavia", "Sesto San Giovanni", "Varese")
+datasets <- list()
+str(x$DECESSISUPOPOLAZIONE)
+for(i in listacomuni){
+  df_60000 %>% filter(NOME_COMUNE==i) %>%
+          mutate(DECESSISUPOPOLAZIONE = (DECESSI/POPOLAZIONE)) %>% 
+          mutate(DECESSI=replace(DECESSI, DECESSI==9999, NA)) -> x
+  
+  x %>% group_by(DATA) %>%
+    summarise(DECESSISUPOPOLAZIONE = sum(DECESSISUPOPOLAZIONE))  %>%
+    as_tibble() -> x
+  assign(paste0('df_comune_',i), x)
+  datasets <- append(datasets,paste0('df_comune_',i))
+}
+```
+
+```{r Bergamots, include=FALSE, echo=FALSE}
+# Milano
+ts_Bergamo <- zoo(df_comune_Bergamo$DECESSISUPOPOLAZIONE, df_comune_Bergamo$DATA)
+ts_Bergamo <- ts(ts_Bergamo, frequency = 90)
+autoplot(ts_Bergamo, main = paste0('Decessi Bergamo 2015-2020'), xlab = 'Anni a 90 giorni', ylab = 'Decessi')
+```
+Il codice per il plot si ripete.  
+```{r Bresciats , echo=FALSE, include=FALSE}
+ts_Brescia <- zoo(df_comune_Brescia$DECESSISUPOPOLAZIONE, df_comune_Brescia$DATA)
+ts_Brescia <- ts(ts_Brescia, frequency = 90)
+autoplot(ts_Brescia, main = paste0('Decessi Brescia 2015-2020'), xlab = 'Anni a 90 giorni', ylab = 'Decessi')
+```
+
+```{r Busto Arsiziots, echo=FALSE, include=FALSE}
+ts_Bs <- zoo(`df_comune_Busto Arsizio`$DECESSISUPOPOLAZIONE, `df_comune_Busto Arsizio`$DATA)
+ts_Bs <- ts(ts_Bs, frequency = 90)
+autoplot(ts_Bs, main = paste0('Decessi Busto Arsizio 2015-2020'), xlab = 'Anni a 90 giorni', ylab = 'Decessi')
+```
+
+```{r Cinisello Balsamots, echo=FALSE, include=FALSE}
+# Milano
+ts_Cb <- zoo(`df_comune_Cinisello Balsamo`$DECESSISUPOPOLAZIONE, `df_comune_Cinisello Balsamo`$DATA)
+ts_Cb <- ts(ts_Cb, frequency = 90)
+autoplot(ts_Cb, main = paste0('Decessi Cinisello 2015-2020'), xlab = 'Anni a 90 giorni', ylab = 'Decessi')
+```
+
+```{r Comots, echo=FALSE, include=FALSE}
+ts_Como <- zoo(df_comune_Como$DECESSISUPOPOLAZIONE, df_comune_Como$DATA)
+ts_Como <- ts(ts_Como, frequency = 90)
+autoplot(ts_Como, main = paste0('Decessi Como 2015-2020'), xlab = 'Anni a 90 giorni', ylab = 'Decessi')
+```
+
+```{r Cremonats, echo=FALSE, include=FALSE}
+ts_Cremona <- zoo(df_comune_Cremona$DECESSISUPOPOLAZIONE, df_comune_Cremona$DATA)
+ts_Cremona <- ts(ts_Cremona, frequency = 90)
+autoplot(ts_Cremona, main = paste0('Decessi Cremona 2015-2020'), xlab = 'Anni a 90 giorni', ylab = 'Decessi')
+```
+
+```{r Legnanots, echo=FALSE, include=FALSE}
+ts_Legnano <- zoo(df_comune_Legnano$DECESSISUPOPOLAZIONE, df_comune_Legnano$DATA)
+ts_Legnano <- ts(ts_Legnano, frequency = 90)
+autoplot(ts_Legnano, main = paste0('Decessi Legnano 2015-2020'), xlab = 'Anni a 90 giorni', ylab = 'Decessi')
+```
+
+```{r Milanots, echo=FALSE, include=FALSE}
+# Milano
+ts_milano <- zoo(df_comune_Milano$DECESSISUPOPOLAZIONE, df_comune_Milano$DATA)
+ts_milano <- ts(ts_milano, frequency = 90)
+autoplot(ts_milano, main = paste0('Decessi Milano 2015-2020'), xlab = 'Anni a 90 giorni', ylab = 'Decessi')
+```
+
+```{r Monzats, echo=FALSE, include=FALSE}
+ts_Monza <- zoo(df_comune_Monza$DECESSISUPOPOLAZIONE, df_comune_Monza$DATA)
+ts_Monza <- ts(ts_Monza, frequency = 90)
+autoplot(ts_Monza, main = paste0('Decessi Monza 2015-2020'), xlab = 'Anni a 90 giorni', ylab = 'Decessi')
+```
+
+```{r Paviats, echo=FALSE, include=FALSE}
+ts_Pavia <- zoo(df_comune_Pavia$DECESSISUPOPOLAZIONE, df_comune_Pavia$DATA)
+ts_Pavia <- ts(ts_Pavia, frequency = 90)
+autoplot(ts_Pavia, main = paste0('Decessi Pavia 2015-2020'), xlab = 'Anni a 90 giorni', ylab = 'Decessi')
+```
+
+```{r sestosgiovannits, echo=FALSE, include=FALSE}
+ts_ssg<- zoo(`df_comune_Sesto San Giovanni`$DECESSISUPOPOLAZIONE, `df_comune_Sesto San Giovanni`$DATA)
+ts_ssg <- ts(ts_ssg, frequency = 90)
+autoplot(ts_ssg, main = paste0('Decessi Sesto San Giovanni 2015-2020'), xlab = 'Anni a 90 giorni', ylab = 'Decessi')
+```
+
+```{r varesets, echo=FALSE, include=FALSE}
+ts_Varese<- zoo(df_comune_Varese$DECESSISUPOPOLAZIONE, df_comune_Varese$DATA)
+ts_Varese <- ts(ts_Varese, frequency = 90)
+autoplot(ts_Varese, main = paste0('Decessi Sesto San Giovanni 2015-2020'), xlab = 'Anni a 90 giorni', ylab = 'Decessi')
+```
+
+```{r tutte assieme, include=FALSE}
+ts_total <- ts.union(ts_Bergamo, ts_Brescia, ts_Bs, ts_Cb, ts_Como, ts_Cremona, ts_Legnano, ts_milano, ts_Monza, ts_Pavia, ts_ssg, ts_Varese)
+# colnames(ts_total)
+colnames(ts_total)[1:12] <- listacomuni
+autoplot(ts_total, main = paste0('Decessi Milano'), xlab = 'Marzo', ylab = 'Decessi')
+```
+Al contrario del grafico precedente se consideriamo i morti rispetto alla popolazione notiamo che non è Milano la città con il record più negativo, ma diventa Bergamo che è seguito dal Cremona e Brescia.  
+
+Decidiamo di analizzare i NULL, per cui secondo le specifiche del dataset questi comuni non hanno avuto un incremento del 20% della mortalità dell'anno 2020. Perciò decidiamo arbitrariamente di sostituirli con i valori delle medie dei 5 anni precedenti. Così facendo notiamo fin  da subito un incremento molto evidente della mortalità per il mese di Marzo anno 2020. Supponiamo perciò si tratti non solo unicamente del Covid poichè è per noi impossibile da dimostrare, ma sicuramente c'è stato un forte impatto.  
+```{r per vedere lombardia}
+df %>% filter(ANNO %in% c(15,16,17,18,19),
+              MESE %in% c(1,2,3),
+              DECESSI != 9999) %>% 
+        group_by(NOME_COMUNE,ANNO,MESE) %>% 
+        summarise(DECESSI = sum(DECESSI)) %>% group_by(NOME_COMUNE,MESE) %>% 
+                  summarise(DECESSI=mean(DECESSI)) -> mean_dataset
+df %>% filter(is.na(DECESSI),
+              MESE %in% c(1,2,3)) %>% 
+        mutate(DECESSI = NA) %>% 
+        group_by(NOME_COMUNE,ANNO,MESE) %>% 
+        summarise(DECESSI = sum()) %>% 
+        left_join(mean_dataset, by = c("NOME_COMUNE" = "NOME_COMUNE", "MESE" = "MESE")) %>% mutate(DECESSI.x = as.integer(DECESSI.y)) -> finale
+df  %>%filter(MESE %in% c(1,2,3)) %>% mutate(DECESSI = ifelse(DECESSI==9999, NA, DECESSI)) %>% group_by(NOME_COMUNE,ANNO,MESE) %>% 
+        summarise(DECESSI = sum(DECESSI)) -> oprpr
+finale_sistemati_null <- oprpr %>% left_join(finale, by = c("NOME_COMUNE" = "NOME_COMUNE", "MESE" = "MESE")) %>% mutate(DECESSI = ifelse(is.na(DECESSI), as.integer(DECESSI.y), DECESSI))
+colnames(finale_sistemati_null)[2] <- "ANNO" 
+finale_sistemati_null <- finale_sistemati_null[-c(5:7)]
+finale_sistemati_null %>%
+  group_by(ANNO, MESE) %>% 
+  summarise(DECESSI = sum(DECESSI)) -> finale_sistemati_null
+finale_sistemati_null %>% mutate(MESEANNO = paste0(ANNO,"-",MESE)) -> finale_sistemati_null
+
+ts_tot_lomb <- zoo(finale_sistemati_null$DECESSI, finale_sistemati_null$MESEANNO)
+ts_tot_lomb <- ts(ts_tot_lomb, frequency = 3)
+
+autoplot(ts_tot_lomb, main = paste0('Totale Decessi Lombardia'), ylab = 'Decessi')
+
+for(i in 1:6){
+  print(paste0("Anno 20",14+i,": ",ts_tot_lomb[3*i]))
+}
+```
+
+Dalla serie storica e dei valori assoluti del mese di Marzo degli anni che vanno dal $2015:2020$ si può notare che il numero dei decessi nel $2020$ è più che raddoppiato.
