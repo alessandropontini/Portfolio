@@ -1,1 +1,1 @@
-I Codici dei progetti che gestirò nei prossimi monenti verranno caricati qua in copia
+Tutti i progetti che ho affrontato nel corso della Laurea Magistrale in Data Science della Università degli studi di Milano-Bicocca
