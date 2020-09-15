@@ -1,0 +1,1 @@
+This folder has different codes that I used in Statistical Modelling course

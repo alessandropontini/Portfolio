@@ -1,0 +1,1 @@
+This folder has different workflow for Knime. This is a workgroup made by me and others collegue

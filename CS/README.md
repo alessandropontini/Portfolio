@@ -1,1 +1,1 @@
-This folder have the Computer Science Project
+This folder has the Computer Science Project

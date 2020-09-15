@@ -1,1 +1,1 @@
-This folder contain only few code from Colaboratory
+This folder contains only few code from Colaboratory
